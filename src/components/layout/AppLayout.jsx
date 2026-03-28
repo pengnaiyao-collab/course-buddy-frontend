@@ -9,6 +9,7 @@ import {
   LogoutOutlined,
   UserOutlined,
   DownOutlined,
+  ThunderboltOutlined,
 } from '@ant-design/icons';
 import { useDispatch, useSelector } from 'react-redux';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -21,6 +22,7 @@ const NAV_ITEMS = [
   { path: '/courses', label: 'Course Library', icon: <BookOutlined /> },
   { path: '/kb', label: 'Knowledge Base', icon: <DatabaseOutlined />, subPaths: ['/kb/'] },
   { path: '/qa', label: 'Q&A Assistant', icon: <RobotOutlined /> },
+  { path: '/ai', label: 'AI Generation', icon: <ThunderboltOutlined /> },
   { path: '/collaboration', label: 'Collaboration', icon: <TeamOutlined /> },
   { path: '/notes', label: 'My Notes', icon: <FileTextOutlined /> },
 ];

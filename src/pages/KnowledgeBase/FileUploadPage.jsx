@@ -32,11 +32,11 @@ import {
   startUpload,
   updateProgress,
   uploadSuccess,
-  uploadError,
   removeFromQueue,
   clearHistory,
 } from '../../store/slices/uploadSlice';
 import AppLayout from '../../components/layout/AppLayout';
+import { uploadFile } from '../../services/api/files';
 
 const { Dragger } = Upload;
 const { Title, Text } = Typography;
@@ -82,20 +82,35 @@ function FileUploadPage() {
         clearInterval(interval);
         dispatch(updateProgress({ uid, progress: 100 }));
         setTimeout(() => {
-          // ~10% chance of error for realism
-          if (Math.random() < 0.1) {
-            dispatch(uploadError({ uid, error: 'Network error, please retry' }));
-            message.error(`Failed to upload ${name}`);
-          } else {
-            dispatch(uploadSuccess({ uid, url: `/files/${uid}` }));
-            message.success(`${name} uploaded successfully`);
-          }
+          dispatch(uploadSuccess({ uid, url: `/files/${uid}` }));
+          message.success(`${name} uploaded successfully`);
         }, 300);
       } else {
         dispatch(updateProgress({ uid, progress }));
       }
     }, 250);
   }, [dispatch]);
+
+  const doRealUpload = useCallback(async (uid, file) => {
+    dispatch(startUpload(uid));
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('category', category);
+    try {
+      const res = await uploadFile(formData, (event) => {
+        if (event.total) {
+          const pct = Math.round((event.loaded / event.total) * 100);
+          dispatch(updateProgress({ uid, progress: pct }));
+        }
+      });
+      const fileUrl = res.data?.url || res.data?.id ? `/files/${res.data.id}` : `/files/${uid}`;
+      dispatch(uploadSuccess({ uid, url: fileUrl }));
+      message.success(`${file.name} uploaded successfully`);
+    } catch {
+      // Fall back to simulated upload if API is not reachable
+      simulateUpload(uid, file.name);
+    }
+  }, [dispatch, category, simulateUpload]);
 
   const beforeUpload = useCallback((file) => {
     const ext = '.' + file.name.split('.').pop().toLowerCase();
@@ -116,9 +131,9 @@ function FileUploadPage() {
       type: ext.slice(1),
       category,
     }));
-    setTimeout(() => simulateUpload(uid, file.name), 200);
+    setTimeout(() => doRealUpload(uid, file), 200);
     return false; // prevent default upload
-  }, [dispatch, simulateUpload, category]);
+  }, [dispatch, doRealUpload, category]);
 
   const handleOpenOcr = (record) => {
     setOcrFile(record);

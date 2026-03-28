@@ -12,6 +12,7 @@ import FileListPage from './pages/KnowledgeBase/FileListPage';
 import KnowledgePointPage from './pages/KnowledgeBase/KnowledgePointPage';
 import VersionHistoryPage from './pages/KnowledgeBase/VersionHistoryPage';
 import PermissionManagePage from './pages/KnowledgeBase/PermissionManagePage';
+import AIContentPage from './pages/AI/AIContentPage';
 
 function PrivateRoute({ children }) {
   const { token } = useSelector((state) => state.auth);
@@ -44,6 +45,14 @@ function App() {
           element={
             <PrivateRoute>
               <QAAssistantPage />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/ai"
+          element={
+            <PrivateRoute>
+              <AIContentPage />
             </PrivateRoute>
           }
         />
