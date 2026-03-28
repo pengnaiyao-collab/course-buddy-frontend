@@ -6,6 +6,12 @@ import CourseLibraryPage from './pages/CourseLibrary/CourseLibraryPage';
 import QAAssistantPage from './pages/QAAssistant/QAAssistantPage';
 import CollaborationPage from './pages/Collaboration/CollaborationPage';
 import NotesPage from './pages/Notes/NotesPage';
+import KnowledgeBaseDashboard from './pages/KnowledgeBase/KnowledgeBaseDashboard';
+import FileUploadPage from './pages/KnowledgeBase/FileUploadPage';
+import FileListPage from './pages/KnowledgeBase/FileListPage';
+import KnowledgePointPage from './pages/KnowledgeBase/KnowledgePointPage';
+import VersionHistoryPage from './pages/KnowledgeBase/VersionHistoryPage';
+import PermissionManagePage from './pages/KnowledgeBase/PermissionManagePage';
 
 function PrivateRoute({ children }) {
   const { token } = useSelector((state) => state.auth);
@@ -54,6 +60,54 @@ function App() {
           element={
             <PrivateRoute>
               <NotesPage />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/kb"
+          element={
+            <PrivateRoute>
+              <KnowledgeBaseDashboard />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/kb/upload"
+          element={
+            <PrivateRoute>
+              <FileUploadPage />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/kb/files"
+          element={
+            <PrivateRoute>
+              <FileListPage />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/kb/knowledge"
+          element={
+            <PrivateRoute>
+              <KnowledgePointPage />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/kb/versions"
+          element={
+            <PrivateRoute>
+              <VersionHistoryPage />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/kb/permissions"
+          element={
+            <PrivateRoute>
+              <PermissionManagePage />
             </PrivateRoute>
           }
         />
