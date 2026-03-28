@@ -1,42 +1,38 @@
 import React from 'react';
-import { Layout, Typography, Avatar, Button, Dropdown } from 'antd';
+import { Layout, Typography } from 'antd';
 import {
   BookOutlined,
   DatabaseOutlined,
   RobotOutlined,
   TeamOutlined,
   FileTextOutlined,
-  LogoutOutlined,
-  UserOutlined,
-  DownOutlined,
   ThunderboltOutlined,
 } from '@ant-design/icons';
-import { useDispatch, useSelector } from 'react-redux';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { logout } from '../../store/slices/authSlice';
+import { useTranslation } from 'react-i18next';
+import SearchBar from '../common/SearchBar';
+import NotificationBell from '../common/NotificationBell';
+import MessageIcon from '../common/MessageIcon';
+import UserMenu from '../common/UserMenu';
+import LanguageSwitcher from '../common/LanguageSwitcher';
+import ThemeSwitcher from '../common/ThemeSwitcher';
 
 const { Header, Content, Sider } = Layout;
 const { Text } = Typography;
 
-const NAV_ITEMS = [
-  { path: '/courses', label: 'Course Library', icon: <BookOutlined /> },
-  { path: '/kb', label: 'Knowledge Base', icon: <DatabaseOutlined />, subPaths: ['/kb/'] },
-  { path: '/qa', label: 'Q&A Assistant', icon: <RobotOutlined /> },
-  { path: '/ai', label: 'AI Generation', icon: <ThunderboltOutlined /> },
-  { path: '/collaboration', label: 'Collaboration', icon: <TeamOutlined /> },
-  { path: '/notes', label: 'My Notes', icon: <FileTextOutlined /> },
-];
-
 function AppLayout({ children, activeKey }) {
-  const dispatch = useDispatch();
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
-  const { user } = useSelector((state) => state.auth);
 
-  const handleLogout = () => {
-    dispatch(logout());
-    navigate('/login');
-  };
+  const NAV_ITEMS = [
+    { path: '/courses', labelKey: 'nav.courseLibrary', icon: <BookOutlined /> },
+    { path: '/kb', labelKey: 'nav.knowledgeBase', icon: <DatabaseOutlined />, subPaths: ['/kb/'] },
+    { path: '/qa', labelKey: 'nav.qaAssistant', icon: <RobotOutlined /> },
+    { path: '/ai', labelKey: 'nav.aiGeneration', icon: <ThunderboltOutlined /> },
+    { path: '/collaboration', labelKey: 'nav.collaboration', icon: <TeamOutlined /> },
+    { path: '/notes', labelKey: 'nav.myNotes', icon: <FileTextOutlined /> },
+  ];
 
   const isActive = (item) => {
     if (activeKey) return activeKey === item.path;
@@ -47,15 +43,6 @@ function AppLayout({ children, activeKey }) {
     return false;
   };
 
-  const userMenuItems = [
-    {
-      key: 'logout',
-      icon: <LogoutOutlined />,
-      label: 'Sign out',
-      onClick: handleLogout,
-    },
-  ];
-
   return (
     <Layout style={{ minHeight: '100vh' }}>
       <Header
@@ -63,40 +50,50 @@ function AppLayout({ children, activeKey }) {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          background: '#1677ff',
-          padding: '0 24px',
+          background: 'var(--header-bg, #1677ff)',
+          padding: '0 16px',
           position: 'sticky',
           top: 0,
           zIndex: 100,
+          gap: 12,
         }}
       >
+        {/* Logo */}
         <div
           className="flex items-center cursor-pointer"
+          style={{ flexShrink: 0 }}
           onClick={() => navigate('/courses')}
         >
-          <BookOutlined style={{ color: '#fff', fontSize: 22, marginRight: 10 }} />
-          <Text strong style={{ color: '#fff', fontSize: 18 }}>
+          <BookOutlined style={{ color: '#fff', fontSize: 22, marginRight: 8 }} />
+          <Text strong style={{ color: '#fff', fontSize: 18, whiteSpace: 'nowrap' }}>
             CourseBuddy
           </Text>
         </div>
 
-        <Dropdown menu={{ items: userMenuItems }} trigger={['click']}>
-          <div className="flex items-center gap-2 cursor-pointer select-none">
-            <Avatar
-              size="small"
-              icon={<UserOutlined />}
-              style={{ background: 'rgba(255,255,255,0.3)' }}
-            />
-            <Text style={{ color: '#fff' }}>{user?.username || 'User'}</Text>
-            <DownOutlined style={{ color: '#fff', fontSize: 11 }} />
-          </div>
-        </Dropdown>
+        {/* Search bar — hidden on small screens */}
+        <div className="hidden md:flex flex-1 justify-center" style={{ maxWidth: 320 }}>
+          <SearchBar />
+        </div>
+
+        {/* Right actions */}
+        <div className="flex items-center gap-1" style={{ flexShrink: 0 }}>
+          <NotificationBell />
+          <MessageIcon />
+          <LanguageSwitcher />
+          <ThemeSwitcher />
+          <UserMenu />
+        </div>
       </Header>
 
       <Layout>
         <Sider
           width={220}
-          style={{ background: '#fff', borderRight: '1px solid #f0f0f0' }}
+          style={{
+            background: 'var(--sidebar-bg, #fff)',
+            borderRight: '1px solid var(--sidebar-border, #f0f0f0)',
+          }}
+          breakpoint="md"
+          collapsedWidth={0}
         >
           <div style={{ padding: '16px 0' }}>
             {NAV_ITEMS.map((item) => {
@@ -112,27 +109,34 @@ function AppLayout({ children, activeKey }) {
                     padding: '12px 20px',
                     cursor: 'pointer',
                     fontWeight: active ? 600 : 400,
-                    color: active ? '#1677ff' : '#374151',
-                    background: active ? '#e6f4ff' : 'transparent',
-                    borderRight: active ? '3px solid #1677ff' : '3px solid transparent',
+                    color: active ? 'var(--active-color, #1677ff)' : 'var(--text-primary, #374151)',
+                    background: active ? 'var(--active-bg, #e6f4ff)' : 'transparent',
+                    borderRight: active
+                      ? '3px solid var(--active-color, #1677ff)'
+                      : '3px solid transparent',
                     transition: 'all 0.15s',
                   }}
                   onMouseEnter={(e) => {
-                    if (!active) e.currentTarget.style.background = '#f5f5f5';
+                    if (!active) e.currentTarget.style.background = 'var(--hover-bg, #f5f5f5)';
                   }}
                   onMouseLeave={(e) => {
                     if (!active) e.currentTarget.style.background = 'transparent';
                   }}
                 >
                   <span style={{ fontSize: 16 }}>{item.icon}</span>
-                  <span>{item.label}</span>
+                  <span>{t(item.labelKey)}</span>
                 </div>
               );
             })}
           </div>
         </Sider>
 
-        <Content style={{ background: '#f5f7fa', minHeight: 'calc(100vh - 64px)' }}>
+        <Content
+          style={{
+            background: 'var(--bg-secondary, #f5f7fa)',
+            minHeight: 'calc(100vh - 64px)',
+          }}
+        >
           {children}
         </Content>
       </Layout>
