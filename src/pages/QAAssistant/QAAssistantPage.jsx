@@ -101,8 +101,8 @@ function QAAssistantPage() {
                 const parsed = JSON.parse(data);
                 const token = parsed.content || parsed.token || parsed.text || '';
                 accumulated += token;
-              } catch {
-                // plain text chunk
+              } catch (parseErr) {
+                console.warn('SSE parse error, treating as plain text:', parseErr);
                 accumulated += data;
               }
               setMessages((prev) =>
@@ -245,7 +245,7 @@ function QAAssistantPage() {
                   >
                     {msg.content}
                     {streamingId === msg.id && (
-                      <span style={{ display: 'inline-block', width: 8, height: 14, background: '#1677ff', marginLeft: 2, animation: 'blink 1s step-end infinite', verticalAlign: 'text-bottom' }} />
+                      <span className="cursor-blink" />
                     )}
                   </div>
                 </div>

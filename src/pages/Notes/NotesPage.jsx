@@ -334,7 +334,6 @@ function NotesPage() {
               placeholder="Select or type a category"
               allowClear
               showSearch
-              mode={undefined}
               options={categories.map((c) => ({ value: c, label: c }))}
             />
           </Form.Item>

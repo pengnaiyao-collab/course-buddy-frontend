@@ -109,7 +109,8 @@ function CollaborationPage() {
     try {
       const res = await listProjects();
       setProjects(res.data?.projects || res.data || []);
-    } catch {
+    } catch (err) {
+      console.error('Failed to fetch projects:', err);
       setProjects(SAMPLE_PROJECTS);
     } finally {
       setLoading(false);
@@ -125,7 +126,8 @@ function CollaborationPage() {
       ]);
       setTasks(tasksRes.data?.tasks || tasksRes.data || []);
       setMembers(membersRes.data?.members || membersRes.data || []);
-    } catch {
+    } catch (err) {
+      console.error('Failed to fetch project details:', err);
       setTasks(SAMPLE_TASKS);
       setMembers(SAMPLE_MEMBERS);
     } finally {
@@ -173,7 +175,8 @@ function CollaborationPage() {
         setProjects((prev) => [newProject, ...prev]);
         message.success('Project created');
       }
-    } catch {
+    } catch (err) {
+      console.error('Failed to save project:', err);
       if (!editingProject) {
         setProjects((prev) => [{ id: Date.now(), ...values, memberCount: 1, taskCount: 0, doneCount: 0, status: 'active' }, ...prev]);
         message.success('Project created (offline)');
@@ -188,7 +191,7 @@ function CollaborationPage() {
   const handleDeleteProject = async (id) => {
     try {
       await deleteProject(id);
-    } catch { /* proceed */ }
+    } catch (err) { console.warn('Delete project API unavailable, proceeding locally:', err); }
     setProjects((prev) => prev.filter((p) => p.id !== id));
     if (selectedProject?.id === id) setSelectedProject(null);
     message.success('Project deleted');
@@ -219,7 +222,8 @@ function CollaborationPage() {
         setTasks((prev) => [newTask, ...prev]);
         message.success('Task created');
       }
-    } catch {
+    } catch (err) {
+      console.error('Failed to save task:', err);
       if (!editingTask) {
         setTasks((prev) => [{ id: Date.now(), ...values }, ...prev]);
         message.success('Task created (offline)');
@@ -235,7 +239,7 @@ function CollaborationPage() {
   const handleDeleteTask = async (taskId) => {
     try {
       await deleteTask(selectedProject.id, taskId);
-    } catch { /* proceed */ }
+    } catch (err) { console.warn('Delete task API unavailable, proceeding locally:', err); }
     setTasks((prev) => prev.filter((t) => t.id !== taskId));
     message.success('Task deleted');
   };
@@ -243,7 +247,7 @@ function CollaborationPage() {
   const handleUpdateTaskStatus = async (task, newStatus) => {
     try {
       await updateTask(selectedProject.id, task.id, { ...task, status: newStatus });
-    } catch { /* proceed */ }
+    } catch (err) { console.warn('Update task status API unavailable, proceeding locally:', err); }
     setTasks((prev) => prev.map((t) => t.id === task.id ? { ...t, status: newStatus } : t));
   };
 
@@ -252,7 +256,8 @@ function CollaborationPage() {
     try {
       await inviteProjectMember(selectedProject.id, values);
       message.success(`Invitation sent to ${values.email}`);
-    } catch {
+    } catch (err) {
+      console.warn('Invite API unavailable:', err);
       message.success(`Invitation sent to ${values.email} (offline)`);
     }
     setInviteModalOpen(false);
@@ -262,7 +267,7 @@ function CollaborationPage() {
   const handleRemoveMember = async (memberId) => {
     try {
       await removeProjectMember(selectedProject.id, memberId);
-    } catch { /* proceed */ }
+    } catch (err) { console.warn('Remove member API unavailable, proceeding locally:', err); }
     setMembers((prev) => prev.filter((m) => m.id !== memberId));
     message.success('Member removed');
   };

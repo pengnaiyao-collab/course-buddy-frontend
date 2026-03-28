@@ -159,7 +159,8 @@ function AIContentPage() {
                 const parsed = JSON.parse(data);
                 const token = parsed.content || parsed.token || parsed.text || '';
                 accumulated += token;
-              } catch {
+              } catch (parseErr) {
+                console.warn('SSE parse error, treating as plain text:', parseErr);
                 accumulated += data;
               }
               setStreamingText(accumulated);
@@ -326,7 +327,7 @@ function AIContentPage() {
                         >
                           {displayText}
                           {generating && (
-                            <span style={{ display: 'inline-block', width: 8, height: 14, background: '#1677ff', marginLeft: 2, animation: 'blink 1s step-end infinite', verticalAlign: 'text-bottom' }} />
+                          <span className="cursor-blink" />
                           )}
                         </div>
                       ) : (
