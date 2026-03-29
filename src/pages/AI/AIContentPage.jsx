@@ -53,7 +53,13 @@ const GENERATION_TYPES = [
   { value: 'review_outline', label: '📋 Review Outline', description: 'Generate a structured review outline for the topic' },
   { value: 'key_points', label: '🎯 Key Points', description: 'Extract and summarize key knowledge points' },
   { value: 'exercises', label: '✏️ Practice Exercises', description: 'Generate practice questions and exercises' },
+  { value: 'report_framework', label: '🧪 Report Framework', description: 'Generate experiment/assignment report structure and checklist' },
+  { value: 'core_points', label: '📌 Core Points', description: 'Generate focused core-point summary for assignments/reports' },
+  { value: 'data_processing', label: '📊 Data Processing Plan', description: 'Generate data cleaning and analysis workflow suggestions' },
+  { value: 'question_explanation', label: '🔍 Question Explanation', description: 'Generate step-by-step explanation for a question' },
+  { value: 'mnemonic', label: '🧠 Mnemonic', description: 'Generate memorization formulas /口诀 for quick recall' },
   { value: 'summary', label: '📝 Summary', description: 'Create a comprehensive summary' },
+  { value: 'learning_path', label: '🧭 Learning Path', description: 'Generate a zero-to-advanced staged learning plan with linked resources' },
 ];
 
 const SAMPLE_HISTORY = [
@@ -86,11 +92,33 @@ function AIContentPage() {
   const [filterType, setFilterType] = useState(null);
   const [filterDateRange, setFilterDateRange] = useState(null);
 
+  const normalizeHistoryItem = (item) => {
+    const map = {
+      OUTLINE: 'review_outline',
+      EXAM_POINTS: 'key_points',
+      QUESTIONS: 'exercises',
+      REPORT_FRAMEWORK: 'report_framework',
+      CORE_POINTS: 'core_points',
+      DATA_PROCESSING: 'data_processing',
+      EXPLANATION: 'question_explanation',
+      MNEMONIC: 'mnemonic',
+      BREAKDOWN: 'summary',
+      LEARNING_PATH: 'learning_path',
+    };
+    return {
+      ...item,
+      type: item.type || map[item.contentType] || 'summary',
+      topic: item.topic || item.subject || '',
+    };
+  };
+
   const fetchHistory = useCallback(async () => {
     setHistoryLoading(true);
     try {
       const res = await getGenerationHistory();
-      setHistory(res.data?.history || res.data || []);
+      const body = res.data?.data || res.data;
+      const raw = body?.content || body?.history || body || [];
+      setHistory(Array.isArray(raw) ? raw.map(normalizeHistoryItem) : []);
     } catch {
       setHistory(SAMPLE_HISTORY);
     } finally {
@@ -101,7 +129,7 @@ function AIContentPage() {
   const fetchStats = useCallback(async () => {
     try {
       const res = await getUsageStats();
-      setUsageStats(res.data || SAMPLE_STATS);
+      setUsageStats(res.data?.data || res.data || SAMPLE_STATS);
     } catch {
       setUsageStats(SAMPLE_STATS);
     }
@@ -192,7 +220,8 @@ function AIContentPage() {
       // Fallback: try regular (non-streaming) API
       try {
         const res = await generateContent(payload);
-        const content = res.data?.content || res.data?.result || res.data?.text || 'Generation failed.';
+        const body = res.data?.data || res.data;
+        const content = body?.content || body?.result || body?.text || 'Generation failed.';
         setGeneratedContent(content);
         fetchHistory();
         message.success('Content generated!');
@@ -263,7 +292,13 @@ function AIContentPage() {
     review_outline: <FileTextOutlined />,
     key_points: <BulbOutlined />,
     exercises: <QuestionCircleOutlined />,
+    report_framework: <FileTextOutlined />,
+    core_points: <BulbOutlined />,
+    data_processing: <BarChartOutlined />,
+    question_explanation: <QuestionCircleOutlined />,
+    mnemonic: <BulbOutlined />,
     summary: <FileTextOutlined />,
+    learning_path: <EditOutlined />,
   };
 
   return (

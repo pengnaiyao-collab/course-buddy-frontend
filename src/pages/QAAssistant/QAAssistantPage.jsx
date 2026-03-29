@@ -5,10 +5,12 @@ import {
   Button,
   Avatar,
   Card,
+  Select,
   Spin,
   Space,
   Breadcrumb,
   Tooltip,
+  Tag,
   message,
 } from 'antd';
 import {
@@ -19,6 +21,7 @@ import {
   ClearOutlined,
   ThunderboltOutlined,
 } from '@ant-design/icons';
+import { useNavigate } from 'react-router-dom';
 import AppLayout from '../../components/layout/AppLayout';
 import { streamQuestion, askQuestion } from '../../services/api/qa';
 
@@ -41,10 +44,15 @@ const SUGGESTED_QUESTIONS = [
 ];
 
 function QAAssistantPage() {
+  const navigate = useNavigate();
+  const courseId = Number(localStorage.getItem('selectedCourseId') || 1);
   const [messages, setMessages] = useState(INITIAL_MESSAGES);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [streamingId, setStreamingId] = useState(null);
+  const [conversationId, setConversationId] = useState(null);
+  const [latestSources, setLatestSources] = useState([]);
+  const [qaMode, setQaMode] = useState('private');
   const messagesEndRef = useRef(null);
   const abortControllerRef = useRef(null);
 
@@ -55,6 +63,12 @@ function QAAssistantPage() {
   useEffect(() => {
     scrollToBottom();
   }, [messages, scrollToBottom]);
+
+  useEffect(() => {
+    if (qaMode === 'web') {
+      setLatestSources([]);
+    }
+  }, [qaMode]);
 
   const handleSend = useCallback(async (questionText) => {
     const trimmed = (questionText || input).trim();
@@ -69,7 +83,12 @@ function QAAssistantPage() {
     // Try streaming first, fall back to regular request
     try {
       abortControllerRef.current = new AbortController();
-      const response = await streamQuestion({ question: trimmed });
+      const response = await streamQuestion({
+        question: trimmed,
+        conversationId,
+        courseId,
+        includeKnowledgeContext: qaMode === 'private',
+      });
 
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
@@ -99,6 +118,12 @@ function QAAssistantPage() {
               if (data === '[DONE]') continue;
               try {
                 const parsed = JSON.parse(data);
+                if (parsed.conversationId) {
+                  setConversationId(parsed.conversationId);
+                }
+                if (Array.isArray(parsed.sources)) {
+                  setLatestSources(parsed.sources);
+                }
                 const token = parsed.content || parsed.token || parsed.text || '';
                 accumulated += token;
               } catch (parseErr) {
@@ -115,14 +140,25 @@ function QAAssistantPage() {
       } else {
         // Regular JSON response
         const data = await response.json();
-        const content = data.answer || data.content || data.message || JSON.stringify(data);
+        const payload = data?.data || data;
+        const content = payload.answer || payload.content || payload.message || JSON.stringify(payload);
+        if (payload.conversationId) setConversationId(payload.conversationId);
+        setLatestSources(payload.sources || []);
         setMessages((prev) => [...prev, { id: assistantId, role: 'assistant', content }]);
       }
     } catch (streamErr) {
       // Fall back to regular (non-streaming) API
       try {
-        const res = await askQuestion({ question: trimmed });
-        const content = res.data?.answer || res.data?.content || res.data?.message || 'No response received.';
+        const res = await askQuestion({
+          question: trimmed,
+          conversationId,
+          courseId,
+          includeKnowledgeContext: qaMode === 'private',
+        });
+        const payload = res.data?.data || res.data;
+        const content = payload?.answer || payload?.content || payload?.message || 'No response received.';
+        if (payload?.conversationId) setConversationId(payload.conversationId);
+        setLatestSources(payload?.sources || []);
         setMessages((prev) => [
           ...prev.filter((m) => m.id !== assistantId),
           { id: assistantId, role: 'assistant', content },
@@ -143,7 +179,7 @@ function QAAssistantPage() {
       setStreamingId(null);
       abortControllerRef.current = null;
     }
-  }, [input, loading]);
+  }, [input, loading, conversationId, courseId, qaMode]);
 
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -154,6 +190,8 @@ function QAAssistantPage() {
 
   const handleClearHistory = () => {
     setMessages(INITIAL_MESSAGES);
+    setConversationId(null);
+    setLatestSources([]);
     message.success('Conversation cleared');
   };
 
@@ -178,6 +216,16 @@ function QAAssistantPage() {
                 <span>AI Q&amp;A Assistant</span>
                 <ThunderboltOutlined style={{ color: '#fa8c16', fontSize: 12 }} />
                 <Text type="secondary" style={{ fontSize: 12 }}>Streaming</Text>
+                <Select
+                  size="small"
+                  style={{ width: 180 }}
+                  value={qaMode}
+                  onChange={setQaMode}
+                  options={[
+                    { value: 'private', label: '私域知识库模式' },
+                    { value: 'web', label: '全网合规模式' },
+                  ]}
+                />
               </Space>
               <Tooltip title="Clear conversation">
                 <Button
@@ -209,6 +257,24 @@ function QAAssistantPage() {
                 ))}
               </div>
             </div>
+          )}
+
+          {latestSources.length > 0 && (
+            <Card size="small" style={{ marginBottom: 12, background: '#fafafa' }}>
+              <Text type="secondary" style={{ fontSize: 12 }}>Knowledge Sources</Text>
+              <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {latestSources.map((s) => (
+                  <Tag
+                    key={s.knowledgeItemId}
+                    color="blue"
+                    style={{ cursor: 'pointer' }}
+                    onClick={() => navigate(`/kb/knowledge?itemId=${s.knowledgeItemId}&snippet=${encodeURIComponent(s.snippet || '')}`)}
+                  >
+                    K{s.knowledgeItemId}: {s.title}
+                  </Tag>
+                ))}
+              </div>
+            </Card>
           )}
 
           {/* Messages */}

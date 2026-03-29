@@ -47,3 +47,12 @@ export const addKnowledgeResource = (courseId, id, data) =>
 
 export const deleteKnowledgeResource = (courseId, id, resourceId) =>
   apiClient.delete(`${kbBase(courseId)}/${id}/resources/${resourceId}`);
+
+export const listKnowledgeVersions = (courseId, id) =>
+  apiClient.get(`${kbBase(courseId)}/${id}/versions`);
+
+export const rollbackKnowledgeVersion = (courseId, id, versionNumber) =>
+  apiClient.post(`${kbBase(courseId)}/${id}/rollback`, null, { params: { versionNumber } });
+
+export const listKnowledgeAuditLogs = (courseId, id, params) =>
+  apiClient.get(`${kbBase(courseId)}/${id}/audit-logs`, { params });

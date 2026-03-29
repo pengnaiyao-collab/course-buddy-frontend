@@ -20,14 +20,17 @@ import {
   message,
 } from 'antd';
 import {
+  ClockCircleOutlined,
   BulbOutlined,
   DeleteOutlined,
   EditOutlined,
   FileSearchOutlined,
+  HistoryOutlined,
   LinkOutlined,
   PlusOutlined,
 } from '@ant-design/icons';
 import AppLayout from '../../components/layout/AppLayout';
+import { useSearchParams } from 'react-router-dom';
 import {
   addKnowledgeResource,
   autoAnalyzeKnowledge,
@@ -35,8 +38,11 @@ import {
   deleteKnowledgePoint,
   deleteKnowledgeResource,
   getKnowledgeMindmap,
+  listKnowledgeAuditLogs,
   listKnowledgePoints,
   listKnowledgeResources,
+  listKnowledgeVersions,
+  rollbackKnowledgeVersion,
   searchKnowledgePointsAdvanced,
   updateKnowledgePoint,
 } from '../../services/api/knowledge';
@@ -53,7 +59,43 @@ const parseTags = (tags) => {
   return String(tags).split(',').map((t) => t.trim()).filter(Boolean);
 };
 
+const parseMindmapTree = (text) => {
+  if (!text) return null;
+  const rawLines = String(text).split('\n').map((l) => l.replace(/\t/g, '  '));
+  const lines = rawLines
+    .filter((l) => l.trim())
+    .filter((l) => l.trim().toLowerCase() !== 'mindmap');
+  if (!lines.length) return null;
+
+  const normalizeLabel = (label) => label
+    .replace(/^root\s*\(\(/i, '')
+    .replace(/\)\)\s*$/, '')
+    .trim();
+
+  const withMeta = lines.map((line, idx) => ({
+    idx,
+    indent: line.match(/^ */)?.[0]?.length || 0,
+    label: normalizeLabel(line.trim()),
+  }));
+
+  const root = { id: 'root', label: withMeta[0].label, children: [] };
+  const stack = [{ indent: withMeta[0].indent, node: root }];
+
+  for (let i = 1; i < withMeta.length; i += 1) {
+    const current = withMeta[i];
+    const node = { id: `n-${i}`, label: current.label, children: [] };
+    while (stack.length > 0 && current.indent <= stack[stack.length - 1].indent) {
+      stack.pop();
+    }
+    const parent = stack.length ? stack[stack.length - 1].node : root;
+    parent.children.push(node);
+    stack.push({ indent: current.indent, node });
+  }
+  return root;
+};
+
 function KnowledgePointPage() {
+  const [searchParams] = useSearchParams();
   const courseId = Number(localStorage.getItem('selectedCourseId') || 1);
   const [points, setPoints] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -69,6 +111,11 @@ function KnowledgePointPage() {
   const [analyzeOpen, setAnalyzeOpen] = useState(false);
   const [mindmapOpen, setMindmapOpen] = useState(false);
   const [mindmapText, setMindmapText] = useState('');
+  const [sourceSnippet, setSourceSnippet] = useState('');
+  const [versionOpen, setVersionOpen] = useState(false);
+  const [auditOpen, setAuditOpen] = useState(false);
+  const [versions, setVersions] = useState([]);
+  const [auditLogs, setAuditLogs] = useState([]);
   const [saving, setSaving] = useState(false);
 
   const [form] = Form.useForm();
@@ -126,6 +173,22 @@ function KnowledgePointPage() {
   }, [fetchPoints]);
 
   useEffect(() => {
+    const snippet = searchParams.get('snippet');
+    const queryItemId = Number(searchParams.get('itemId') || 0);
+    if (snippet) {
+      setSourceSnippet(snippet);
+    } else {
+      setSourceSnippet('');
+    }
+    if (queryItemId && points.length) {
+      const hit = points.find((p) => p.id === queryItemId);
+      if (hit) {
+        setSelected(hit);
+      }
+    }
+  }, [searchParams, points]);
+
+  useEffect(() => {
     if (selected?.id) fetchResources(selected.id);
     else setResources([]);
   }, [selected, fetchResources]);
@@ -135,6 +198,8 @@ function KnowledgePointPage() {
     points.forEach((p) => p.tagsArray.forEach((t) => set.add(t)));
     return Array.from(set);
   }, [points]);
+
+  const mindmapTree = useMemo(() => parseMindmapTree(mindmapText), [mindmapText]);
 
   const openCreate = () => {
     setEditing(null);
@@ -255,6 +320,59 @@ function KnowledgePointPage() {
     }
   };
 
+  const onOpenVersions = async () => {
+    if (!selected?.id) return;
+    setSaving(true);
+    try {
+      const res = await listKnowledgeVersions(courseId, selected.id);
+      setVersions(res.data || []);
+      setVersionOpen(true);
+    } catch {
+      message.error('Load versions failed');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const onRollbackVersion = async (versionNumber) => {
+    if (!selected?.id) return;
+    setSaving(true);
+    try {
+      await rollbackKnowledgeVersion(courseId, selected.id, versionNumber);
+      message.success(`Rolled back to v${versionNumber}`);
+      setVersionOpen(false);
+      fetchPoints();
+    } catch {
+      message.error('Rollback failed');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const onOpenAuditLogs = async () => {
+    if (!selected?.id) return;
+    setSaving(true);
+    try {
+      const res = await listKnowledgeAuditLogs(courseId, selected.id, { size: 100 });
+      setAuditLogs(res.data?.content || res.data || []);
+      setAuditOpen(true);
+    } catch {
+      message.error('Load audit logs failed');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const renderMindmapNode = (node, depth = 0) => (
+    <div key={node.id} style={{ marginLeft: depth * 18, marginTop: 8 }}>
+      <Tag color={depth === 0 ? 'blue' : 'default'} style={{ marginRight: 8 }}>
+        {depth === 0 ? 'ROOT' : `L${depth}`}
+      </Tag>
+      <Text>{node.label}</Text>
+      {(node.children || []).map((child) => renderMindmapNode(child, depth + 1))}
+    </div>
+  );
+
   return (
     <AppLayout activeKey="/kb">
       <div style={{ padding: 24 }}>
@@ -372,12 +490,23 @@ function KnowledgePointPage() {
                       </Space>
                     </div>
                     <Space>
+                      <Button icon={<HistoryOutlined />} onClick={onOpenVersions}>Version History</Button>
+                      <Button icon={<ClockCircleOutlined />} onClick={onOpenAuditLogs}>Audit Trail</Button>
                       <Button onClick={onGenerateMindmap}>Generate Mind Map</Button>
                       <Button icon={<LinkOutlined />} onClick={() => setResourceOpen(true)}>Attach Resource</Button>
                     </Space>
                   </div>
 
                   <Divider />
+                  {sourceSnippet ? (
+                    <Alert
+                      type="info"
+                      showIcon
+                      style={{ marginBottom: 12 }}
+                      message="Source verification snippet"
+                      description={sourceSnippet}
+                    />
+                  ) : null}
                   <Paragraph style={{ whiteSpace: 'pre-wrap', lineHeight: 1.8 }}>
                     {selected.content || selected.description || 'No content'}
                   </Paragraph>
@@ -476,10 +605,72 @@ function KnowledgePointPage() {
           footer={null}
           width={900}
         >
-          <Text type="secondary">Copy the Mermaid text to any Mermaid renderer:</Text>
+          <Text type="secondary">Visualized mind map:</Text>
+          <div style={{ marginTop: 10, marginBottom: 14, maxHeight: 320, overflow: 'auto', padding: 10, border: '1px solid #f0f0f0', borderRadius: 8 }}>
+            {mindmapTree ? renderMindmapNode(mindmapTree) : <Empty description="No mindmap structure detected" />}
+          </div>
+          <Text type="secondary">Mermaid source:</Text>
           <pre style={{ whiteSpace: 'pre-wrap', background: '#fafafa', padding: 12, borderRadius: 8, marginTop: 8 }}>
             {mindmapText}
           </pre>
+        </Modal>
+
+        <Modal
+          title="Version History"
+          open={versionOpen}
+          onCancel={() => setVersionOpen(false)}
+          footer={null}
+          width={860}
+        >
+          <List
+            locale={{ emptyText: 'No version history' }}
+            dataSource={versions}
+            renderItem={(v) => (
+              <List.Item
+                actions={[
+                  <Popconfirm
+                    key="rollback"
+                    title={`Rollback to v${v.versionNumber}?`}
+                    onConfirm={() => onRollbackVersion(v.versionNumber)}
+                  >
+                    <a>Rollback</a>
+                  </Popconfirm>,
+                ]}
+              >
+                <List.Item.Meta
+                  title={<Space><Tag color="blue">v{v.versionNumber}</Tag><Text>{v.description || 'No description'}</Text></Space>}
+                  description={`CreatedBy: ${v.createdBy || '-'} · ${v.createdAt || ''}`}
+                />
+              </List.Item>
+            )}
+          />
+        </Modal>
+
+        <Modal
+          title="Audit Trail"
+          open={auditOpen}
+          onCancel={() => setAuditOpen(false)}
+          footer={null}
+          width={980}
+        >
+          <List
+            locale={{ emptyText: 'No audit logs' }}
+            dataSource={auditLogs}
+            renderItem={(log) => (
+              <List.Item>
+                <List.Item.Meta
+                  title={<Space><Tag color="purple">{log.action}</Tag><Text>{log.createdAt || ''}</Text></Space>}
+                  description={
+                    <Space direction="vertical" style={{ width: '100%' }}>
+                      <Text type="secondary">Operator: {log.operatorName || '-'} (#{log.operatorId || '-'})</Text>
+                      {log.oldValue ? <Text type="secondary" ellipsis={{ tooltip: log.oldValue }}>OLD: {log.oldValue}</Text> : null}
+                      {log.newValue ? <Text type="secondary" ellipsis={{ tooltip: log.newValue }}>NEW: {log.newValue}</Text> : null}
+                    </Space>
+                  }
+                />
+              </List.Item>
+            )}
+          />
         </Modal>
       </div>
     </AppLayout>
