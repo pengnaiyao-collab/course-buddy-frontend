@@ -19,6 +19,7 @@ import {
   Divider,
   message,
   Tooltip,
+  Select,
 } from 'antd';
 import {
   BookOutlined,
@@ -136,7 +137,10 @@ function CourseLibraryPage() {
     setLoading(true);
     try {
       const res = await listCourses({ q: searchQuery || undefined });
-      setCourses(res.data?.courses || res.data || []);
+      // Backend returns ApiResponse { code, message, data: IPage<Course> }
+      const payload = res.data?.data;
+      const records = payload?.records || payload?.courses || payload || [];
+      setCourses(records);
     } catch {
       setCourses(SAMPLE_COURSES);
     } finally {

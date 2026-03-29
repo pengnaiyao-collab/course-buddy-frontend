@@ -55,6 +55,7 @@ function QAAssistantPage() {
   const [qaMode, setQaMode] = useState('private');
   const messagesEndRef = useRef(null);
   const abortControllerRef = useRef(null);
+  const messageContentRef = useRef('');
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -96,47 +97,198 @@ function QAAssistantPage() {
 
       // Check if it's a streaming response
       const contentType = response.headers.get('content-type') || '';
+      console.log('[QA] Response content-type:', contentType);
+      
       if (contentType.includes('text/event-stream') || contentType.includes('application/x-ndjson')) {
         // Server-Sent Events / NDJSON streaming
+        if (!response.body) {
+          throw new Error('Streaming not supported in this environment');
+        }
+
+        console.log('[QA] Starting SSE stream...');
+        let tokenCount = 0;
+        const streamStartTime = Date.now();
+        messageContentRef.current = ''; // Reset ref for this new response
+        console.log('[QA] Setting streamingId to:', assistantId);
         setStreamingId(assistantId);
-        setMessages((prev) => [...prev, { id: assistantId, role: 'assistant', content: '' }]);
+        console.log('[QA] Adding message placeholder for id:', assistantId);
+        setMessages((prev) => {
+          const updated = [...prev, { id: assistantId, role: 'assistant', content: '' }];
+          console.log('[QA] Messages after adding placeholder:', updated);
+          return updated;
+        });
 
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
-        let accumulated = '';
+        let buffer = '';
+        let streamTimeout;
+        const STREAM_TIMEOUT = 30000; // 30 seconds timeout
+        
+        const resetTimeout = () => {
+          clearTimeout(streamTimeout);
+          streamTimeout = setTimeout(() => {
+            console.warn('[QA] ⏱️ Stream timeout - forcing completion');
+            reader.cancel();
+            // Force finalize the message
+            const finalContent = messageContentRef.current;
+            if (finalContent) {
+              setMessages((prev) =>
+                prev.map((m) => (m.id === assistantId ? { ...m, content: finalContent } : m))
+              );
+            }
+            setStreamingId(null);
+            setLoading(false);
+          }, STREAM_TIMEOUT);
+        };
+        
+        resetTimeout();
+
+        const handleBlock = (block) => {
+          resetTimeout(); // Reset timeout whenever we receive data
+          if (!block) return;
+          
+          console.log('[QA] Processing SSE block:', block.substring(0, 100));
+          
+          let eventType = 'message';
+          const dataLines = [];
+          
+          // Parse SSE format: event: xxx\ndata: yyy
+          block.split('\n').forEach((line) => {
+            if (line.startsWith('event:')) {
+              eventType = line.slice(6).trim();
+            } else if (line.startsWith('data:')) {
+              dataLines.push(line.slice(5).trim());
+            }
+          });
+
+          if (dataLines.length === 0) return;
+          const payloadStr = dataLines.join('\n');
+          console.log('[QA] Event type:', eventType, 'Payload:', payloadStr.substring(0, 100));
+
+          if (eventType === 'done') {
+            clearTimeout(streamTimeout);
+            console.log('[QA] ✅ Stream complete! Total tokens:', tokenCount, 'Time:', Date.now() - streamStartTime, 'ms');
+            
+            // CRITICAL: Save message content FIRST before clearing streamingId
+            const finalContent = messageContentRef.current;
+            console.log('[QA] Saving final content before clearing streamingId. Length:', finalContent.length);
+            
+            // Force synchronous update
+            setMessages((prev) => {
+              const updated = prev.map((m) => {
+                if (m.id === assistantId) {
+                  console.log('[QA] Updating assistantId', assistantId, 'with content length:', finalContent.length);
+                  return { ...m, content: finalContent };
+                }
+                return m;
+              });
+              return updated;
+            });
+            
+            // Parse done payload
+            try {
+              const payload = JSON.parse(payloadStr);
+              console.log('[QA] Done event payload:', payload);
+              if (payload.conversationId) setConversationId(payload.conversationId);
+              if (Array.isArray(payload.sources)) setLatestSources(payload.sources);
+            } catch (e) {
+              console.warn('SSE done parse failed:', payloadStr, e);
+            }
+            
+            // ONLY THEN clear streaming state
+            setStreamingId(null);
+            return;
+          }
+
+          // Try to parse as JSON first, if it fails treat as plain text token
+          try {
+            const parsed = JSON.parse(payloadStr);
+            // If it's a JSON object with content/token/text fields
+            if (typeof parsed === 'object' && parsed !== null) {
+              if (parsed.conversationId) setConversationId(parsed.conversationId);
+              if (Array.isArray(parsed.sources)) setLatestSources(parsed.sources);
+              const token = parsed.content || parsed.token || parsed.text || '';
+              messageContentRef.current += token;
+              tokenCount++;
+            } else {
+              // JSON but not an object, treat as string
+              messageContentRef.current += String(parsed);
+              tokenCount++;
+            }
+          } catch (parseErr) {
+            // Not JSON, treat as plain text token
+            if (payloadStr && payloadStr !== '[DONE]') {
+              console.log('[QA] Plain text token:', payloadStr);
+              messageContentRef.current += payloadStr;
+              tokenCount++;
+            }
+          }
+
+          // Update UI less frequently - every 5 tokens or when significant content accumulated
+          if (tokenCount % 5 === 0 || messageContentRef.current.length > 100) {
+            console.log('[QA] Updating message UI - tokens:', tokenCount, 'content length:', messageContentRef.current.length);
+            setMessages((prev) =>
+              prev.map((m) => (m.id === assistantId ? { ...m, content: messageContentRef.current } : m))
+            );
+          }
+        };
 
         while (true) {
           const { done, value } = await reader.read();
-          if (done) break;
-
-          const chunk = decoder.decode(value, { stream: true });
-          // Handle SSE format: "data: ...\n\n"
-          const lines = chunk.split('\n');
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              const data = line.slice(6).trim();
-              if (data === '[DONE]') continue;
-              try {
-                const parsed = JSON.parse(data);
-                if (parsed.conversationId) {
-                  setConversationId(parsed.conversationId);
-                }
-                if (Array.isArray(parsed.sources)) {
-                  setLatestSources(parsed.sources);
-                }
-                const token = parsed.content || parsed.token || parsed.text || '';
-                accumulated += token;
-              } catch (parseErr) {
-                console.warn('SSE parse error, treating as plain text:', parseErr);
-                accumulated += data;
-              }
-              setMessages((prev) =>
-                prev.map((m) => (m.id === assistantId ? { ...m, content: accumulated } : m))
-              );
-            }
+          if (done) {
+            clearTimeout(streamTimeout);
+            break;
           }
+
+          resetTimeout(); // Reset timeout on each chunk received
+          buffer += decoder.decode(value, { stream: true });
+
+          // SSE events are separated by double newlines
+          // Split by \n\n to get complete blocks
+          let startIndex = 0;
+          let blockEndIndex;
+          
+          while ((blockEndIndex = buffer.indexOf('\n\n', startIndex)) !== -1) {
+            const block = buffer.slice(startIndex, blockEndIndex).trim();
+            if (block) {
+              handleBlock(block);
+            }
+            startIndex = blockEndIndex + 2;
+          }
+          
+          // Keep remaining data in buffer
+          buffer = buffer.slice(startIndex);
         }
-        setStreamingId(null);
+
+        // Flush any remaining buffered block
+        if (buffer.trim()) {
+          console.log('[QA] Flushing remaining buffer:', buffer.trim().substring(0, 50));
+          handleBlock(buffer.trim());
+        }
+
+        clearTimeout(streamTimeout);
+
+        // If nothing came through the stream, fall back to non-streaming call
+        console.log('[QA] Final message content length:', messageContentRef.current.length);
+        if (messageContentRef.current.length === 0) {
+          console.warn('[QA] ⚠️ Stream returned empty payload, using fallback');
+          throw new Error('Stream returned empty payload');
+        }
+        
+        // Ensure final message is saved
+        console.log('[QA] Performing final message save...');
+        setMessages((prev) => {
+          const updated = prev.map((m) => {
+            if (m.id === assistantId) {
+              console.log('[QA] Final save - updating assistantId', assistantId, 'content length:', messageContentRef.current.length);
+              return { ...m, content: messageContentRef.current };
+            }
+            return m;
+          });
+          console.log('[QA] ✅ All messages updated:', updated);
+          return updated;
+        });
+        console.log('[QA] Stream processing completed successfully');
       } else {
         // Regular JSON response
         const data = await response.json();
@@ -147,8 +299,11 @@ function QAAssistantPage() {
         setMessages((prev) => [...prev, { id: assistantId, role: 'assistant', content }]);
       }
     } catch (streamErr) {
-      // Fall back to regular (non-streaming) API
-      try {
+      // Fall back to regular (non-streaming) API or show error if that also fails
+      if (streamTimeout) clearTimeout(streamTimeout);
+      console.error('[QA] SSE Stream error:', streamErr);
+      const fallback = async () => {
+        console.log('[QA] Falling back to non-streaming API...');
         const res = await askQuestion({
           question: trimmed,
           conversationId,
@@ -163,7 +318,12 @@ function QAAssistantPage() {
           ...prev.filter((m) => m.id !== assistantId),
           { id: assistantId, role: 'assistant', content },
         ]);
-      } catch {
+      };
+
+      try {
+        await fallback();
+      } catch (fallbackErr) {
+        console.error('[QA] Fallback also failed:', fallbackErr);
         setMessages((prev) => [
           ...prev.filter((m) => m.id !== assistantId),
           {

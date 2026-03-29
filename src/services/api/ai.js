@@ -38,6 +38,109 @@ export const streamGenerate = async (data) => {
 };
 
 /**
+ * Stream AI chat with SSE (Server-Sent Events)
+ * Processes the stream and calls onToken for each token received
+ * @param {ChatRequestDTO} data - Chat message request
+ * @param {Function} onToken - Callback for each token: (token: string) => void
+ * @param {Function} onDone - Callback when stream completes: (payload: object) => void
+ * @param {Function} onError - Callback on error: (error: Error) => void
+ */
+export const chatStream = async (data, onToken, onDone, onError) => {
+  const token = localStorage.getItem('token');
+  const headers = {
+    'Content-Type': 'application/json',
+    'Accept': 'text/event-stream',
+  };
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  try {
+    const response = await fetch('/api/v1/ai/chat/stream', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(data),
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+
+      // Keep the last incomplete line in the buffer
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (!line.trim()) continue;
+
+        // Handle SSE data format: "data: ..."
+        if (line.startsWith('data: ')) {
+          const data = line.slice(6).trim();
+          
+          // Check if it's the done event
+          if (line.includes('event: done')) {
+            continue; // Skip this line, done event follows in next data line
+          }
+
+          try {
+            // Try to parse as JSON for done event payload
+            const parsed = JSON.parse(data);
+            if (onDone && typeof onDone === 'function') {
+              onDone(parsed);
+            }
+          } catch {
+            // Regular token, not JSON
+            if (onToken && typeof onToken === 'function') {
+              onToken(data);
+            }
+          }
+        } else if (line.startsWith('event: ')) {
+          // SSE event name (e.g., "event: done")
+          const eventName = line.slice(7).trim();
+          if (eventName === 'done' && onDone) {
+            // Next line will be the done event data
+            continue;
+          }
+        }
+      }
+    }
+
+    // Process any remaining data in buffer
+    if (buffer.trim()) {
+      if (buffer.startsWith('data: ')) {
+        const data = buffer.slice(6).trim();
+        try {
+          const parsed = JSON.parse(data);
+          if (onDone && typeof onDone === 'function') {
+            onDone(parsed);
+          }
+        } catch {
+          if (onToken && typeof onToken === 'function') {
+            onToken(data);
+          }
+        }
+      }
+    }
+  } catch (error) {
+    if (onError && typeof onError === 'function') {
+      onError(error);
+    } else {
+      throw error;
+    }
+  }
+};
+
+/**
  * Get AI generation history
  */
 export const getGenerationHistory = (params) =>

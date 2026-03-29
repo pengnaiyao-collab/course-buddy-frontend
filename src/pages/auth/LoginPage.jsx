@@ -18,8 +18,9 @@ function LoginPage() {
     dispatch(setLoading(true));
     try {
       const response = await login(values);
-      const { token, user } = response.data;
-      dispatch(setCredentials({ token, user }));
+      // API returns { code, message, data: { token, tokenType, userId, username, email, role } }
+      const { token, ...userInfo } = response.data?.data || {};
+      dispatch(setCredentials({ token, user: userInfo }));
       message.success('Login successful!');
       navigate('/courses');
     } catch (err) {
