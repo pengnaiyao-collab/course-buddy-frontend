@@ -9,6 +9,11 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  // Provide Node global for libraries like sockjs/stomp in browser
+  define: {
+    global: 'window',
+    'process.env': {},
+  },
   server: {
     port: 3000,
     proxy: {
