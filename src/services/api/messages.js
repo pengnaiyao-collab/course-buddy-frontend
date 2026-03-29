@@ -8,9 +8,18 @@ export const getConversations = (page = 0, size = 20) =>
 export const getConversation = (userId, page = 0, size = 50) =>
   apiClient.get(`/messages/conversations/${userId}`, { params: { page, size } });
 
+// Backward-compatible alias used by MessageCenterPage
+export const getMessages = (conversationId, page = 0, size = 50) =>
+  apiClient.get(`/messages/conversation/${conversationId}`, { params: { page, size } });
+
 // Send message to user
-export const sendMessage = (recipientId, content) =>
-  apiClient.post('/messages', { recipientId, content });
+export const sendMessage = (recipientId, payloadOrContent) => {
+  const content =
+    typeof payloadOrContent === 'string'
+      ? payloadOrContent
+      : payloadOrContent?.content;
+  return apiClient.post('/messages', { recipientId, content });
+};
 
 // Mark single message as read
 export const markMessageRead = (messageId) =>
@@ -21,8 +30,10 @@ export const markConversationRead = (userId) =>
   apiClient.put(`/messages/conversations/${userId}/read-all`);
 
 // Delete message
-export const deleteMessage = (messageId) =>
-  apiClient.delete(`/messages/${messageId}`);
+export const deleteMessage = (conversationIdOrMessageId, maybeMessageId) => {
+  const messageId = maybeMessageId ?? conversationIdOrMessageId;
+  return apiClient.delete(`/messages/${messageId}`);
+};
 
 // Get unread message count
 export const getUnreadCount = () =>
@@ -39,4 +50,3 @@ export const searchMessages = (query) =>
 // Get message statistics
 export const getMessageStats = () =>
   apiClient.get('/messages/stats');
-

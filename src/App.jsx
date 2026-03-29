@@ -13,6 +13,7 @@ import FileListPage from './pages/KnowledgeBase/FileListPage';
 import KnowledgePointPage from './pages/KnowledgeBase/KnowledgePointPage';
 import VersionHistoryPage from './pages/KnowledgeBase/VersionHistoryPage';
 import PermissionManagePage from './pages/KnowledgeBase/PermissionManagePage';
+import KnowledgeGraphPage from './pages/Knowledge/KnowledgeGraphPage';
 import AIContentPage from './pages/AI/AIContentPage';
 import UserProfilePage from './pages/UserProfile/UserProfilePage';
 import SettingsPage from './pages/Settings/SettingsPage';
@@ -108,6 +109,14 @@ function App() {
             element={
               <PrivateRoute>
                 <KnowledgePointPage />
+              </PrivateRoute>
+            }
+          />
+          <Route
+            path="/kb/graph"
+            element={
+              <PrivateRoute>
+                <KnowledgeGraphPage />
               </PrivateRoute>
             }
           />

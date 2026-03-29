@@ -28,6 +28,7 @@ import {
   FilePptOutlined,
   FileImageOutlined,
   ArrowRightOutlined,
+  ApartmentOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useSelector } from 'react-redux';
@@ -195,6 +196,13 @@ function KnowledgeBaseDashboard() {
               onClick={() => navigate('/kb/files')}
             >
               Browse Files
+            </Button>
+            <Button
+              icon={<ApartmentOutlined />}
+              size="large"
+              onClick={() => navigate('/kb/graph')}
+            >
+              Knowledge Graph
             </Button>
             <Button
               icon={<ClockCircleOutlined />}

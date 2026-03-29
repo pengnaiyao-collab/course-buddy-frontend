@@ -15,6 +15,8 @@ import {
   Tooltip,
   Badge,
   Alert,
+  InputNumber,
+  Switch,
 } from 'antd';
 import {
   InboxOutlined,
@@ -36,7 +38,8 @@ import {
   clearHistory,
 } from '../../store/slices/uploadSlice';
 import AppLayout from '../../components/layout/AppLayout';
-import { uploadFile } from '../../services/api/files';
+import { uploadFileWithCategory } from '../../services/api/files';
+import { recognizeOcr } from '../../services/api/ocr';
 
 const { Dragger } = Upload;
 const { Title, Text } = Typography;
@@ -52,6 +55,7 @@ const MAX_SIZE_MB = 100;
 const CATEGORIES = ['Lecture Notes', 'Assignments', 'Lab Materials', 'Reference', 'Media', 'Other'];
 
 const OCR_SUPPORTED = new Set(['jpg', 'jpeg', 'png', 'gif', 'pdf']);
+const isOcrFileType = (name) => OCR_SUPPORTED.has(name.split('.').pop().toLowerCase());
 
 function getStatusTag(status) {
   switch (status) {
@@ -70,7 +74,11 @@ function FileUploadPage() {
   const [category, setCategory] = useState('Lecture Notes');
   const [ocrVisible, setOcrVisible] = useState(false);
   const [ocrFile, setOcrFile] = useState(null);
+  const [ocrRunning, setOcrRunning] = useState(false);
+  const [ocrCourseId, setOcrCourseId] = useState(1);
+  const [autoOcrEnabled, setAutoOcrEnabled] = useState(true);
   const [activeTab, setActiveTab] = useState('upload');
+  const [localFilesByUid, setLocalFilesByUid] = useState({});
 
   const simulateUpload = useCallback((uid, name) => {
     dispatch(startUpload(uid));
@@ -91,26 +99,62 @@ function FileUploadPage() {
     }, 250);
   }, [dispatch]);
 
+  const runOcrForFile = useCallback(async (file, { courseId, silent = false } = {}) => {
+    const resolvedCourseId = courseId || Number(localStorage.getItem('selectedCourseId') || 1);
+    const res = await recognizeOcr({
+      file,
+      language: 'chi_sim+eng',
+      courseId: resolvedCourseId,
+      category: category || 'OCR Notes',
+      tags: `OCR,${category || 'Lecture Notes'}`,
+      autoArchive: true,
+    });
+
+    if (!res.ok) {
+      throw new Error(`OCR failed: HTTP ${res.status}`);
+    }
+    const body = await res.json();
+    const result = body?.data;
+    if (!silent) {
+      if (result?.knowledgeItemId) {
+        message.success(`OCR completed and archived to knowledge base (ID: ${result.knowledgeItemId})`);
+      } else {
+        message.success('OCR completed');
+      }
+    }
+    return result;
+  }, [category]);
+
   const doRealUpload = useCallback(async (uid, file) => {
     dispatch(startUpload(uid));
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('category', category);
     try {
-      const res = await uploadFile(formData, (event) => {
-        if (event.total) {
-          const pct = Math.round((event.loaded / event.total) * 100);
-          dispatch(updateProgress({ uid, progress: pct }));
-        }
-      });
-      const fileUrl = res.data?.url || res.data?.id ? `/files/${res.data.id}` : `/files/${uid}`;
+      const res = await uploadFileWithCategory(file, category);
+      if (!res.ok) {
+        throw new Error(`Upload failed: HTTP ${res.status}`);
+      }
+      const body = await res.json();
+      const first = body?.data?.successResults?.[0];
+      const uploadId = first?.uploadId || uid;
+      const fileUrl = `/files/${uploadId}`;
+      dispatch(updateProgress({ uid, progress: 100 }));
       dispatch(uploadSuccess({ uid, url: fileUrl }));
       message.success(`${file.name} uploaded successfully`);
+
+      if (autoOcrEnabled && isOcrFileType(file.name)) {
+        // Run in background so upload UX remains responsive.
+        runOcrForFile(file, { silent: true }).then((result) => {
+          if (result?.knowledgeItemId) {
+            message.success(`${file.name}: auto OCR archived (ID: ${result.knowledgeItemId})`);
+          }
+        }).catch(() => {
+          message.warning(`${file.name}: auto OCR failed, you can retry manually`);
+        });
+      }
     } catch {
       // Fall back to simulated upload if API is not reachable
       simulateUpload(uid, file.name);
     }
-  }, [dispatch, category, simulateUpload]);
+  }, [dispatch, category, simulateUpload, autoOcrEnabled, runOcrForFile]);
 
   const beforeUpload = useCallback((file) => {
     const ext = '.' + file.name.split('.').pop().toLowerCase();
@@ -131,13 +175,34 @@ function FileUploadPage() {
       type: ext.slice(1),
       category,
     }));
+    setLocalFilesByUid((prev) => ({ ...prev, [uid]: file }));
     setTimeout(() => doRealUpload(uid, file), 200);
     return false; // prevent default upload
   }, [dispatch, doRealUpload, category]);
 
   const handleOpenOcr = (record) => {
     setOcrFile(record);
+    setOcrCourseId(Number(localStorage.getItem('selectedCourseId') || 1));
     setOcrVisible(true);
+  };
+
+  const handleRunOcr = async () => {
+    if (!ocrFile) return;
+    const file = localFilesByUid[ocrFile.uid];
+    if (!file) {
+      message.error('Original file not found in local session. Please upload again and retry OCR.');
+      return;
+    }
+
+    setOcrRunning(true);
+    try {
+      await runOcrForFile(file, { courseId: ocrCourseId, silent: false });
+      setOcrVisible(false);
+    } catch {
+      message.error('OCR failed. Please check backend OCR service and try again.');
+    } finally {
+      setOcrRunning(false);
+    }
   };
 
   const isOcrSupported = (name) => {
@@ -227,6 +292,10 @@ function FileUploadPage() {
               style={{ width: 200 }}
               options={CATEGORIES.map((c) => ({ label: c, value: c }))}
             />
+            <Space>
+              <Switch checked={autoOcrEnabled} onChange={setAutoOcrEnabled} />
+              <Text type="secondary">Auto OCR after upload (images/PDF)</Text>
+            </Space>
           </div>
 
           <Dragger
@@ -310,8 +379,8 @@ function FileUploadPage() {
           onCancel={() => setOcrVisible(false)}
           footer={[
             <Button key="close" onClick={() => setOcrVisible(false)}>Close</Button>,
-            <Button key="run" type="primary" icon={<ScanOutlined />}
-              onClick={() => { message.info('OCR processing started — results will appear shortly.'); setOcrVisible(false); }}>
+            <Button key="run" type="primary" icon={<ScanOutlined />} loading={ocrRunning}
+              onClick={handleRunOcr}>
               Start OCR
             </Button>,
           ]}
@@ -328,6 +397,12 @@ function FileUploadPage() {
               />
               <div style={{ marginTop: 12 }}>
                 <Text type="secondary">Supported: JPG, PNG, GIF, PDF (scanned)</Text>
+              </div>
+              <div style={{ marginTop: 12 }}>
+                <Text strong>Course ID for auto-archive:</Text>
+                <div style={{ marginTop: 6 }}>
+                  <InputNumber min={1} value={ocrCourseId} onChange={(v) => setOcrCourseId(v || 1)} />
+                </div>
               </div>
             </div>
           )}

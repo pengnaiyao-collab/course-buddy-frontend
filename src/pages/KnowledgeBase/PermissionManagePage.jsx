@@ -1,301 +1,293 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Table,
-  Card,
+  Alert,
   Button,
+  Card,
+  Col,
+  Form,
+  Input,
+  InputNumber,
+  Modal,
+  Popconfirm,
+  Row,
+  Select,
+  Space,
+  Table,
+  Tabs,
   Tag,
   Typography,
-  Space,
-  Modal,
-  Form,
-  Select,
-  Input,
-  Popconfirm,
   message,
-  Avatar,
-  Tabs,
-  Divider,
-  Badge,
-  Tooltip,
-  Alert,
-  Row,
-  Col,
-  Checkbox,
 } from 'antd';
 import {
-  UserAddOutlined,
-  DeleteOutlined,
-  EditOutlined,
-  SafetyOutlined,
   AuditOutlined,
-  TeamOutlined,
   CheckCircleOutlined,
   CloseCircleOutlined,
+  RotateRightOutlined,
+  SafetyOutlined,
+  TeamOutlined,
+  UserSwitchOutlined,
 } from '@ant-design/icons';
 import AppLayout from '../../components/layout/AppLayout';
+import {
+  approveReview,
+  listMembers,
+  listPendingReviews,
+  removeMember,
+  rejectReview,
+  removeReview,
+  rotateAdmin,
+  submitReview,
+  takedownReview,
+  updateMemberPermission,
+  getPermissionMatrix,
+  updatePermissionMatrix,
+  voteAdmin,
+} from '../../services/api/permissions';
 
 const { Title, Text } = Typography;
 
 const ROLE_CONFIG = {
-  L1: { label: 'Course Admin', color: 'red', level: 1 },
-  L2: { label: 'Core Collaborator', color: 'orange', level: 2 },
-  L3: { label: 'Enrolled Member', color: 'blue', level: 3 },
-  L4: { label: 'Campus Visitor', color: 'default', level: 4 },
+  L1: { label: 'Course Admin', color: 'red' },
+  L2: { label: 'Core Collaborator', color: 'orange' },
+  L3: { label: 'Enrolled Member', color: 'blue' },
+  L4: { label: 'Campus Visitor', color: 'default' },
 };
 
-const PERMISSION_MATRIX = [
-  { permission: 'View Files', L1: true, L2: true, L3: true, L4: true },
-  { permission: 'Download Files', L1: true, L2: true, L3: true, L4: false },
-  { permission: 'Upload Files', L1: true, L2: true, L3: false, L4: false },
-  { permission: 'Edit Knowledge Points', L1: true, L2: true, L3: false, L4: false },
-  { permission: 'Delete Files', L1: true, L2: false, L3: false, L4: false },
-  { permission: 'Export Materials', L1: true, L2: true, L3: true, L4: false },
-  { permission: 'Manage Members', L1: true, L2: false, L3: false, L4: false },
-  { permission: 'Review & Approve', L1: true, L2: true, L3: false, L4: false },
-  { permission: 'View Audit Log', L1: true, L2: false, L3: false, L4: false },
-];
-
-const MOCK_MEMBERS = [
-  { id: 1, name: 'Prof. Chen Wei', email: 'chen.wei@university.edu', role: 'L1', joinedAt: '2024-01-10', avatar: 'C' },
-  { id: 2, name: 'Alice Wang', email: 'alice.wang@university.edu', role: 'L2', joinedAt: '2024-01-15', avatar: 'A' },
-  { id: 3, name: 'Bob Liu', email: 'bob.liu@university.edu', role: 'L2', joinedAt: '2024-01-20', avatar: 'B' },
-  { id: 4, name: 'Carol Zhang', email: 'carol.zhang@university.edu', role: 'L3', joinedAt: '2024-02-01', avatar: 'C' },
-  { id: 5, name: 'David Kim', email: 'david.kim@university.edu', role: 'L3', joinedAt: '2024-02-05', avatar: 'D' },
-  { id: 6, name: 'Emma Liu', email: 'emma.liu@student.edu', role: 'L3', joinedAt: '2024-02-10', avatar: 'E' },
-  { id: 7, name: 'Frank Chen', email: 'frank.chen@student.edu', role: 'L4', joinedAt: '2024-02-15', avatar: 'F' },
-  { id: 8, name: 'Grace Park', email: 'grace.park@student.edu', role: 'L4', joinedAt: '2024-02-20', avatar: 'G' },
-];
-
-const MOCK_AUDIT_LOG = [
-  { id: 1, action: 'Upload File', user: 'Alice Wang', timestamp: '2024-03-15 10:23', details: 'Uploaded Lecture_01_Introduction.pdf' },
-  { id: 2, action: 'Change Role', user: 'Prof. Chen Wei', timestamp: '2024-03-14 14:30', details: 'Changed Bob Liu from L3 to L2' },
-  { id: 3, action: 'Delete File', user: 'Prof. Chen Wei', timestamp: '2024-03-14 11:00', details: 'Deleted old_notes_draft.docx' },
-  { id: 4, action: 'Invite Member', user: 'Prof. Chen Wei', timestamp: '2024-03-13 09:15', details: 'Invited grace.park@student.edu as L4' },
-  { id: 5, action: 'Edit Knowledge Point', user: 'Bob Liu', timestamp: '2024-03-12 16:45', details: 'Edited "Big-O Notation" knowledge point' },
-  { id: 6, action: 'Rollback Version', user: 'Alice Wang', timestamp: '2024-03-12 10:20', details: 'Rolled back Week3_Algorithms.pptx to v2' },
-  { id: 7, action: 'Remove Member', user: 'Prof. Chen Wei', timestamp: '2024-03-10 08:30', details: 'Removed temp_user@external.com' },
-  { id: 8, action: 'Upload File', user: 'Bob Liu', timestamp: '2024-03-09 17:55', details: 'Uploaded CodeSamples_Week5.zip' },
-];
-
-const AVATAR_COLORS = ['#f56a00', '#7265e6', '#ffbf00', '#00a2ae', '#1677ff', '#52c41a', '#722ed1', '#eb2f96'];
-
-let memberIdCounter = MOCK_MEMBERS.length + 1;
+const ACTION_LEVEL_KEYS = ['l1', 'l2', 'l3', 'l4'];
+const LEVEL_LABELS = ['L1', 'L2', 'L3', 'L4'];
 
 function PermissionManagePage() {
-  const [members, setMembers] = useState(MOCK_MEMBERS);
-  const [inviteVisible, setInviteVisible] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [form] = Form.useForm();
-  const [activeTab, setActiveTab] = useState('members');
+  const courseId = Number(localStorage.getItem('selectedCourseId') || 1);
+  const myUserId = Number(localStorage.getItem('userId') || 1);
+  const [loading, setLoading] = useState(false);
+  const [members, setMembers] = useState([]);
+  const [matrix, setMatrix] = useState([]);
+  const [reviews, setReviews] = useState([]);
+  const [voteOpen, setVoteOpen] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [voteForm] = Form.useForm();
+  const [reviewForm] = Form.useForm();
+
+  const fetchAll = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [mRes, pRes, rRes] = await Promise.all([
+        listMembers(courseId),
+        getPermissionMatrix(courseId),
+        listPendingReviews({ size: 100 }),
+      ]);
+      setMembers(mRes.data || []);
+      setMatrix(pRes.data || []);
+      setReviews(rRes.data?.content || rRes.data || []);
+    } catch (e) {
+      console.error(e);
+      message.error('Failed to load permission governance data');
+    } finally {
+      setLoading(false);
+    }
+  }, [courseId]);
 
   useEffect(() => {
-    setTimeout(() => setLoading(false), 400);
-  }, []);
+    fetchAll();
+  }, [fetchAll]);
 
-  const handleInvite = () => {
-    form.validateFields().then((values) => {
-      const namePart = values.email.split('@')[0];
-      const newMember = {
-        id: memberIdCounter++,
-        name: namePart,
-        email: values.email,
-        role: values.role,
-        joinedAt: new Date().toISOString().slice(0, 10),
-        avatar: namePart[0].toUpperCase(),
-      };
-      setMembers((prev) => [...prev, newMember]);
-      message.success(`Invitation sent to ${values.email}`);
-      setInviteVisible(false);
-      form.resetFields();
-    });
+  const candidateOptions = useMemo(
+    () => members.filter((m) => m.permissionLevel !== 'L1')
+      .map((m) => ({ label: `User#${m.userId} (${m.permissionLevel})`, value: m.userId })),
+    [members]
+  );
+
+  const handleRoleChange = async (record, newRole) => {
+    try {
+      await updateMemberPermission(courseId, record.userId, newRole);
+      message.success('Role updated');
+      fetchAll();
+    } catch {
+      message.error('Failed to update role');
+    }
   };
 
-  const handleRoleChange = (memberId, newRole) => {
-    setMembers((prev) => prev.map((m) => m.id === memberId ? { ...m, role: newRole } : m));
-    message.success('Role updated successfully');
+  const handleRemoveMember = async (record) => {
+    try {
+      await removeMember(courseId, record.userId);
+      message.success('Member removed');
+      fetchAll();
+    } catch {
+      message.error('Failed to remove member');
+    }
   };
 
-  const handleRemove = (memberId) => {
-    setMembers((prev) => prev.filter((m) => m.id !== memberId));
-    message.success('Member removed');
+  const toggleMatrix = async (actionKey, level, checked) => {
+    try {
+      await updatePermissionMatrix({
+        courseId,
+        actionKey,
+        permissionLevel: level,
+        allowed: checked,
+      });
+      setMatrix((prev) => prev.map((row) => (
+        row.actionKey === actionKey ? { ...row, [level.toLowerCase()]: checked } : row
+      )));
+      message.success('Permission matrix updated');
+    } catch {
+      message.error('Update failed');
+    }
+  };
+
+  const handleVote = async (values, mode = 'vote') => {
+    const api = mode === 'rotate' ? rotateAdmin : voteAdmin;
+    try {
+      const res = await api(courseId, values.candidateUserId);
+      const info = res.data;
+      if (info.promotedToAdmin) {
+        message.success('Candidate promoted to L1');
+      } else {
+        message.info(`Vote recorded (${info.votes}/${info.threshold})`);
+      }
+      setVoteOpen(false);
+      voteForm.resetFields();
+      fetchAll();
+    } catch {
+      message.error(mode === 'rotate' ? 'Rotate failed' : 'Vote failed');
+    }
+  };
+
+  const handleSubmitReview = async (values) => {
+    try {
+      await submitReview({
+        contentType: values.contentType,
+        contentId: values.contentId,
+        reviewerId: values.reviewerId,
+        requiredApprovals: values.requiredApprovals || 2,
+        comments: values.comments,
+      });
+      message.success('Review submitted');
+      setReviewOpen(false);
+      reviewForm.resetFields();
+      fetchAll();
+    } catch {
+      message.error('Submit review failed');
+    }
+  };
+
+  const handleReviewAction = async (action, review) => {
+    try {
+      if (action === 'approve') await approveReview(review.id, myUserId, 'Approved');
+      if (action === 'reject') await rejectReview(review.id, myUserId, 'Rejected');
+      if (action === 'takedown') await takedownReview(review.id, myUserId, 'Violation - takedown');
+      if (action === 'remove') await removeReview(review.id, myUserId, 'Violation - remove');
+      message.success('Review action completed');
+      fetchAll();
+    } catch {
+      message.error('Review action failed');
+    }
   };
 
   const memberColumns = [
-    {
-      title: 'Member',
-      key: 'member',
-      render: (_, record) => (
-        <Space>
-          <Avatar
-            style={{
-              background: AVATAR_COLORS[record.id % AVATAR_COLORS.length],
-              flexShrink: 0,
-            }}
-          >
-            {record.avatar}
-          </Avatar>
-          <div>
-            <div style={{ fontWeight: 500 }}>{record.name}</div>
-            <Text type="secondary" style={{ fontSize: 12 }}>{record.email}</Text>
-          </div>
-        </Space>
-      ),
-    },
-    {
-      title: 'Role',
-      dataIndex: 'role',
-      key: 'role',
-      width: 180,
-      render: (role, record) => (
-        <Select
-          value={role}
-          onChange={(v) => handleRoleChange(record.id, v)}
-          style={{ width: 170 }}
-          options={Object.entries(ROLE_CONFIG).map(([k, v]) => ({
-            value: k,
-            label: (
-              <Space>
-                <Tag color={v.color} style={{ margin: 0 }}>{k}</Tag>
-                {v.label}
-              </Space>
-            ),
-          }))}
-        />
-      ),
-    },
-    {
-      title: 'Joined',
-      dataIndex: 'joinedAt',
-      key: 'joinedAt',
-      width: 110,
-      render: (v) => <Text type="secondary" style={{ fontSize: 12 }}>{v}</Text>,
-    },
-    {
-      title: 'Actions',
-      key: 'actions',
-      width: 100,
-      render: (_, record) => (
-        record.role !== 'L1' ? (
-          <Popconfirm
-            title={`Remove ${record.name}?`}
-            description="This member will lose access to the knowledge base."
-            onConfirm={() => handleRemove(record.id)}
-          >
-            <Button size="small" danger icon={<DeleteOutlined />}>
-              Remove
-            </Button>
-          </Popconfirm>
-        ) : (
-          <Tooltip title="Cannot remove the course admin">
-            <Button size="small" disabled icon={<DeleteOutlined />}>
-              Remove
-            </Button>
-          </Tooltip>
-        )
-      ),
-    },
+    { title: 'User ID', dataIndex: 'userId', key: 'userId', width: 100 },
+    { title: 'Role', dataIndex: 'permissionLevel', key: 'permissionLevel', width: 220, render: (role, record) => (
+      <Select
+        value={role}
+        onChange={(v) => handleRoleChange(record, v)}
+        style={{ width: 180 }}
+        options={Object.entries(ROLE_CONFIG).map(([k, v]) => ({
+          value: k,
+          label: <Space><Tag color={v.color}>{k}</Tag>{v.label}</Space>,
+        }))}
+      />
+    )},
+    { title: 'Actions', key: 'actions', render: (_, record) => (
+      <Popconfirm title="Remove this member?" onConfirm={() => handleRemoveMember(record)}>
+        <Button danger size="small">Remove</Button>
+      </Popconfirm>
+    )},
   ];
 
-  const auditColumns = [
-    {
-      title: 'Action',
-      dataIndex: 'action',
-      key: 'action',
-      width: 160,
-      render: (v) => <Tag color="blue">{v}</Tag>,
-    },
-    { title: 'User', dataIndex: 'user', key: 'user', width: 150 },
-    { title: 'Timestamp', dataIndex: 'timestamp', key: 'timestamp', width: 160,
-      render: (v) => <Text type="secondary" style={{ fontSize: 12 }}>{v}</Text> },
-    { title: 'Details', dataIndex: 'details', key: 'details', ellipsis: true },
-  ];
-
-  const permissionColumns = [
-    { title: 'Permission', dataIndex: 'permission', key: 'permission' },
-    ...Object.entries(ROLE_CONFIG).map(([key, cfg]) => ({
-      title: <Tag color={cfg.color}>{key} {cfg.label}</Tag>,
-      dataIndex: key,
-      key,
-      width: 160,
+  const matrixColumns = [
+    { title: 'Action', dataIndex: 'actionName', key: 'actionName' },
+    ...LEVEL_LABELS.map((lv, idx) => ({
+      title: <Tag color={ROLE_CONFIG[lv].color}>{lv}</Tag>,
+      key: lv,
+      dataIndex: ACTION_LEVEL_KEYS[idx],
       align: 'center',
-      render: (v) => v
-        ? <CheckCircleOutlined style={{ color: '#52c41a', fontSize: 16 }} />
-        : <CloseCircleOutlined style={{ color: '#d9d9d9', fontSize: 16 }} />,
+      render: (val, row) => (
+        <Button
+          type={val ? 'primary' : 'default'}
+          size="small"
+          onClick={() => toggleMatrix(row.actionKey, lv, !val)}
+          icon={val ? <CheckCircleOutlined /> : <CloseCircleOutlined />}
+        >
+          {val ? 'Allow' : 'Deny'}
+        </Button>
+      ),
     })),
+  ];
+
+  const reviewColumns = [
+    { title: 'ID', dataIndex: 'id', key: 'id', width: 80 },
+    { title: 'Content', key: 'content', render: (_, r) => `${r.contentType}#${r.contentId}` },
+    { title: 'Status', dataIndex: 'status', key: 'status', width: 130 },
+    { title: 'Approvals', key: 'approvals', width: 120, render: (_, r) => `${r.approvalCount}/${r.requiredApprovals}` },
+    { title: 'Moderation', dataIndex: 'moderationStatus', key: 'moderationStatus', width: 140 },
+    { title: 'Actions', key: 'actions', render: (_, r) => (
+      <Space wrap>
+        <Button size="small" onClick={() => handleReviewAction('approve', r)}>Approve</Button>
+        <Button size="small" onClick={() => handleReviewAction('reject', r)}>Reject</Button>
+        <Button size="small" danger onClick={() => handleReviewAction('takedown', r)}>Takedown</Button>
+        <Button size="small" danger type="primary" onClick={() => handleReviewAction('remove', r)}>Remove</Button>
+      </Space>
+    )},
   ];
 
   const tabItems = [
     {
       key: 'members',
-      label: (
-        <Space>
-          <TeamOutlined />
-          Members
-          <Badge count={members.length} style={{ backgroundColor: '#1677ff' }} />
-        </Space>
-      ),
-      children: (
-        <div>
-          <div className="flex justify-between items-center mb-4">
-            <Text type="secondary">{members.length} members in this knowledge base</Text>
-            <Button type="primary" icon={<UserAddOutlined />} onClick={() => setInviteVisible(true)}>
-              Invite Member
-            </Button>
-          </div>
-          <Table
-            loading={loading}
-            dataSource={members}
-            columns={memberColumns}
-            rowKey="id"
-            pagination={{ pageSize: 8 }}
-            size="middle"
-          />
-        </div>
-      ),
+      label: <Space><TeamOutlined />Members & Roles</Space>,
+      children: <Table rowKey="id" loading={loading} dataSource={members} columns={memberColumns} pagination={false} />,
     },
     {
       key: 'matrix',
-      label: (
-        <Space>
-          <SafetyOutlined />
-          Permission Matrix
-        </Space>
-      ),
+      label: <Space><SafetyOutlined />Action Matrix</Space>,
       children: (
-        <div>
+        <>
           <Alert
-            message="Permission levels define what each role can do in the knowledge base."
             type="info"
             showIcon
-            style={{ marginBottom: 16, borderRadius: 8 }}
+            style={{ marginBottom: 12 }}
+            message="Fine-grained governance permissions: view / upload / edit / export / review / takedown / delete / member management."
           />
-          <Table
-            dataSource={PERMISSION_MATRIX}
-            columns={permissionColumns}
-            rowKey="permission"
-            pagination={false}
-            size="middle"
-            bordered
-          />
-        </div>
+          <Table rowKey="actionKey" loading={loading} dataSource={matrix} columns={matrixColumns} pagination={false} />
+        </>
       ),
     },
     {
-      key: 'audit',
-      label: (
-        <Space>
-          <AuditOutlined />
-          Audit Log
+      key: 'election',
+      label: <Space><UserSwitchOutlined />Admin Election & Rotation</Space>,
+      children: (
+        <Space direction="vertical" style={{ width: '100%' }}>
+          <Text type="secondary">Students can vote for candidates. Current admin can also rotate directly.</Text>
+          <Space>
+            <Button type="primary" onClick={() => { voteForm.setFieldsValue({ mode: 'vote' }); setVoteOpen(true); }}>
+              Vote Candidate
+            </Button>
+            <Button icon={<RotateRightOutlined />} onClick={() => { voteForm.setFieldsValue({ mode: 'rotate' }); setVoteOpen(true); }}>
+              Rotate Admin
+            </Button>
+          </Space>
         </Space>
       ),
+    },
+    {
+      key: 'review',
+      label: <Space><AuditOutlined />Double Review & Violations</Space>,
       children: (
-        <Table
-          dataSource={MOCK_AUDIT_LOG}
-          columns={auditColumns}
-          rowKey="id"
-          pagination={{ pageSize: 8 }}
-          size="middle"
-        />
+        <>
+          <div className="flex items-center justify-between mb-3">
+            <Text type="secondary">Student uploads can require dual approval before publish.</Text>
+            <Button type="primary" onClick={() => setReviewOpen(true)}>Submit Review</Button>
+          </div>
+          <Table rowKey="id" loading={loading} dataSource={reviews} columns={reviewColumns} pagination={{ pageSize: 8 }} />
+        </>
       ),
     },
   ];
@@ -304,84 +296,72 @@ function PermissionManagePage() {
     <AppLayout activeKey="/kb">
       <div style={{ padding: 24 }}>
         <div className="flex items-center justify-between mb-4">
-          <Title level={3} style={{ margin: 0 }}>Permission Management</Title>
+          <Title level={3} style={{ margin: 0 }}>Permission Governance</Title>
+          <Tag color="blue">Course {courseId}</Tag>
         </div>
-
-        {/* Role legend */}
-        <Card
-          bordered={false}
-          style={{ borderRadius: 12, marginBottom: 16, boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}
-        >
-          <Row gutter={[16, 8]}>
-            {Object.entries(ROLE_CONFIG).map(([key, cfg]) => (
-              <Col key={key} xs={12} sm={6}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <Tag color={cfg.color} style={{ fontSize: 13, padding: '4px 8px', margin: 0 }}>
-                    {key}
-                  </Tag>
-                  <Text style={{ fontSize: 13 }}>{cfg.label}</Text>
-                </div>
-              </Col>
-            ))}
-          </Row>
+        <Card bordered={false} style={{ borderRadius: 12 }}>
+          <Tabs items={tabItems} />
         </Card>
-
-        <Card
-          bordered={false}
-          style={{ borderRadius: 12, boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}
-        >
-          <Tabs
-            activeKey={activeTab}
-            onChange={setActiveTab}
-            items={tabItems}
-          />
-        </Card>
-
-        {/* Invite Modal */}
-        <Modal
-          title={
-            <Space>
-              <UserAddOutlined />
-              Invite Member
-            </Space>
-          }
-          open={inviteVisible}
-          onCancel={() => { setInviteVisible(false); form.resetFields(); }}
-          onOk={handleInvite}
-          okText="Send Invitation"
-        >
-          <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
-            <Form.Item
-              name="email"
-              label="Email Address"
-              rules={[
-                { required: true, message: 'Email is required' },
-                { type: 'email', message: 'Enter a valid email address' },
-              ]}
-            >
-              <Input placeholder="user@university.edu" />
-            </Form.Item>
-            <Form.Item
-              name="role"
-              label="Assign Role"
-              initialValue="L3"
-              rules={[{ required: true, message: 'Please select a role' }]}
-            >
-              <Select
-                options={Object.entries(ROLE_CONFIG).map(([k, v]) => ({
-                  value: k,
-                  label: (
-                    <Space>
-                      <Tag color={v.color}>{k}</Tag>
-                      {v.label}
-                    </Space>
-                  ),
-                }))}
-              />
-            </Form.Item>
-          </Form>
-        </Modal>
       </div>
+
+      <Modal
+        open={voteOpen}
+        title="Admin Election / Rotation"
+        onCancel={() => setVoteOpen(false)}
+        onOk={() => voteForm.submit()}
+      >
+        <Form form={voteForm} layout="vertical" onFinish={(v) => handleVote(v, v.mode)}>
+          <Form.Item name="mode" label="Mode" initialValue="vote">
+            <Select options={[
+              { value: 'vote', label: 'Vote Candidate' },
+              { value: 'rotate', label: 'Rotate Admin' },
+            ]} />
+          </Form.Item>
+          <Form.Item name="candidateUserId" label="Candidate" rules={[{ required: true }]}>
+            <Select options={candidateOptions} />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        open={reviewOpen}
+        title="Submit Review Task"
+        onCancel={() => setReviewOpen(false)}
+        onOk={() => reviewForm.submit()}
+      >
+        <Form form={reviewForm} layout="vertical" onFinish={handleSubmitReview}>
+          <Row gutter={12}>
+            <Col span={12}>
+              <Form.Item name="contentType" label="Content Type" rules={[{ required: true }]}>
+                <Select options={[
+                  { value: 'KNOWLEDGE_ITEM', label: 'KNOWLEDGE_ITEM' },
+                  { value: 'FILE_UPLOAD', label: 'FILE_UPLOAD' },
+                ]} />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="contentId" label="Content ID" rules={[{ required: true }]}>
+                <InputNumber min={1} style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Row gutter={12}>
+            <Col span={12}>
+              <Form.Item name="reviewerId" label="Primary Reviewer ID" rules={[{ required: true }]}>
+                <InputNumber min={1} style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="requiredApprovals" label="Required Approvals" initialValue={2}>
+                <InputNumber min={1} max={5} style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Form.Item name="comments" label="Comments">
+            <Input.TextArea rows={3} />
+          </Form.Item>
+        </Form>
+      </Modal>
     </AppLayout>
   );
 }

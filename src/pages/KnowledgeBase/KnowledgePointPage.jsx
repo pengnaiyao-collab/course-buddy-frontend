@@ -1,187 +1,257 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Row,
-  Col,
-  Card,
-  Input,
+  Alert,
   Button,
-  Tag,
-  Typography,
-  Space,
-  Modal,
-  Form,
-  Select,
+  Card,
+  Col,
   Divider,
   Empty,
-  Popconfirm,
-  message,
+  Form,
+  Input,
   List,
-  Badge,
-  Tooltip,
+  Modal,
+  Popconfirm,
+  Row,
+  Select,
+  Space,
   Spin,
+  Tag,
+  Typography,
+  message,
 } from 'antd';
 import {
-  PlusOutlined,
-  SearchOutlined,
-  EditOutlined,
-  DeleteOutlined,
-  TagOutlined,
-  LinkOutlined,
   BulbOutlined,
-  FilterOutlined,
+  DeleteOutlined,
+  EditOutlined,
+  FileSearchOutlined,
+  LinkOutlined,
+  PlusOutlined,
 } from '@ant-design/icons';
 import AppLayout from '../../components/layout/AppLayout';
 import {
-  listKnowledgePoints,
-  getKnowledgePoint,
+  addKnowledgeResource,
+  autoAnalyzeKnowledge,
   createKnowledgePoint,
-  updateKnowledgePoint,
   deleteKnowledgePoint,
+  deleteKnowledgeResource,
+  getKnowledgeMindmap,
+  listKnowledgePoints,
+  listKnowledgeResources,
+  searchKnowledgePointsAdvanced,
+  updateKnowledgePoint,
 } from '../../services/api/knowledge';
 
 const { Title, Text, Paragraph } = Typography;
-const { Search } = Input;
-const { TextArea } = Input;
+const { Search, TextArea } = Input;
 
-const TAG_COLORS = [
-  'blue','green','red','orange','purple','cyan','magenta','volcano','gold','lime',
-];
+const TAG_COLORS = ['blue', 'green', 'red', 'orange', 'purple', 'cyan', 'magenta', 'gold', 'lime'];
+const RESOURCE_TYPES = ['NOTE', 'SLIDE', 'EXAM', 'HOMEWORK', 'VIDEO', 'AUDIO', 'LINK'];
 
-const SAMPLE_POINTS = [
-  {
-    id: 1,
-    title: 'Big-O Notation',
-    content: 'Big-O notation describes the upper bound of the time complexity of an algorithm. It allows us to compare the efficiency of algorithms without worrying about hardware or implementation details.',
-    tags: ['Algorithm', 'Math'],
-    createdAt: '2024-03-10',
-    author: 'Prof. Chen',
-  },
-  {
-    id: 2,
-    title: 'Binary Search Tree (BST)',
-    content: 'A BST is a binary tree in which each node has a key greater than all keys in its left subtree and less than all keys in its right subtree.',
-    tags: ['Data Structure', 'Algorithm'],
-    createdAt: '2024-03-11',
-    author: 'Alice Wang',
-  },
-];
+const parseTags = (tags) => {
+  if (!tags) return [];
+  if (Array.isArray(tags)) return tags.filter(Boolean);
+  return String(tags).split(',').map((t) => t.trim()).filter(Boolean);
+};
 
 function KnowledgePointPage() {
+  const courseId = Number(localStorage.getItem('selectedCourseId') || 1);
   const [points, setPoints] = useState([]);
   const [selected, setSelected] = useState(null);
-  const [search, setSearch] = useState('');
-  const [filterTag, setFilterTag] = useState(null);
-  const [modalOpen, setModalOpen] = useState(false);
-  const [editingPoint, setEditingPoint] = useState(null);
-  const [form] = Form.useForm();
+  const [resources, setResources] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [resourceLoading, setResourceLoading] = useState(false);
+  const [keyword, setKeyword] = useState('');
+  const [selectedTags, setSelectedTags] = useState([]);
+  const [tagMode, setTagMode] = useState('OR');
+  const [editOpen, setEditOpen] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [resourceOpen, setResourceOpen] = useState(false);
+  const [analyzeOpen, setAnalyzeOpen] = useState(false);
+  const [mindmapOpen, setMindmapOpen] = useState(false);
+  const [mindmapText, setMindmapText] = useState('');
   const [saving, setSaving] = useState(false);
+
+  const [form] = Form.useForm();
+  const [resourceForm] = Form.useForm();
+  const [analyzeForm] = Form.useForm();
 
   const fetchPoints = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await listKnowledgePoints({ q: search || undefined });
+      let res;
+      if (keyword || selectedTags.length) {
+        res = await searchKnowledgePointsAdvanced(courseId, {
+          keyword,
+          tags: selectedTags,
+          tagMode,
+        });
+      } else {
+        res = await listKnowledgePoints(courseId);
+      }
       const data = res.data?.content || res.data || [];
-      setPoints(data);
-      if (data.length > 0 && !selected) {
-        setSelected(data[0]);
+      const normalized = data.map((p) => ({
+        ...p,
+        content: p.content || p.description || '',
+        tagsArray: parseTags(p.tags),
+      }));
+      setPoints(normalized);
+      if (normalized.length && (!selected || !normalized.some((p) => p.id === selected.id))) {
+        setSelected(normalized[0]);
+      } else if (!normalized.length) {
+        setSelected(null);
       }
-    } catch {
-      setPoints(SAMPLE_POINTS);
-      if (!selected && SAMPLE_POINTS.length > 0) {
-        setSelected(SAMPLE_POINTS[0]);
-      }
+    } catch (e) {
+      console.error(e);
+      message.error('Failed to load knowledge points');
     } finally {
       setLoading(false);
     }
-  }, [search, selected]);
+  }, [courseId, keyword, selectedTags, tagMode, selected]);
+
+  const fetchResources = useCallback(async (itemId) => {
+    if (!itemId) return;
+    setResourceLoading(true);
+    try {
+      const res = await listKnowledgeResources(courseId, itemId);
+      setResources(res.data || []);
+    } catch {
+      setResources([]);
+    } finally {
+      setResourceLoading(false);
+    }
+  }, [courseId]);
 
   useEffect(() => {
     fetchPoints();
   }, [fetchPoints]);
 
-  const filtered = points.filter((p) => {
-    if (search && !p.title.toLowerCase().includes(search.toLowerCase()) &&
-        !p.content.toLowerCase().includes(search.toLowerCase())) return false;
-    if (filterTag && !p.tags?.includes(filterTag)) return false;
-    return true;
-  });
+  useEffect(() => {
+    if (selected?.id) fetchResources(selected.id);
+    else setResources([]);
+  }, [selected, fetchResources]);
 
-  const allTags = [...new Set(points.flatMap((p) => p.tags || []))];
+  const allTags = useMemo(() => {
+    const set = new Set();
+    points.forEach((p) => p.tagsArray.forEach((t) => set.add(t)));
+    return Array.from(set);
+  }, [points]);
 
   const openCreate = () => {
-    setEditingPoint(null);
+    setEditing(null);
     form.resetFields();
-    setModalOpen(true);
+    form.setFieldsValue({ tags: [] });
+    setEditOpen(true);
   };
 
-  const openEdit = (point) => {
-    setEditingPoint(point);
+  const openEdit = (item) => {
+    setEditing(item);
     form.setFieldsValue({
-      title: point.title,
-      content: point.content,
-      tags: point.tags || [],
+      title: item.title,
+      description: item.description,
+      content: item.content,
+      category: item.category,
+      tags: item.tagsArray,
+      fileUrl: item.fileUrl,
+      fileType: item.fileType,
     });
-    setModalOpen(true);
+    setEditOpen(true);
   };
 
-  const handleSave = async (values) => {
+  const onSave = async (values) => {
     setSaving(true);
     const payload = {
       title: values.title,
+      description: values.description,
       content: values.content,
-      tags: values.tags || [],
+      category: values.category,
+      tags: (values.tags || []).join(','),
+      fileUrl: values.fileUrl,
+      fileType: values.fileType,
     };
     try {
-      if (editingPoint) {
-        await updateKnowledgePoint(editingPoint.id, payload);
+      if (editing) {
+        await updateKnowledgePoint(courseId, editing.id, payload);
         message.success('Knowledge point updated');
-        setPoints((prev) =>
-          prev.map((p) =>
-            p.id === editingPoint.id
-              ? { ...p, ...payload, updatedAt: new Date().toISOString().split('T')[0] }
-              : p
-          )
-        );
       } else {
-        await createKnowledgePoint(payload);
+        await createKnowledgePoint(courseId, payload);
         message.success('Knowledge point created');
-        setPoints((prev) => [{ id: Date.now(), ...payload, createdAt: new Date().toISOString().split('T')[0] }, ...prev]);
       }
-      setModalOpen(false);
-      form.resetFields();
+      setEditOpen(false);
+      fetchPoints();
     } catch {
-      // Optimistic local update if API fails
-      if (editingPoint) {
-        setPoints((prev) =>
-          prev.map((p) =>
-            p.id === editingPoint.id
-              ? { ...p, ...payload, updatedAt: new Date().toISOString().split('T')[0] }
-              : p
-          )
-        );
-        message.success('Knowledge point updated (offline)');
-      } else {
-        setPoints((prev) => [{ id: Date.now(), ...payload, createdAt: new Date().toISOString().split('T')[0] }, ...prev]);
-        message.success('Knowledge point created (offline)');
-      }
-      setModalOpen(false);
-      form.resetFields();
+      message.error('Save failed');
     } finally {
       setSaving(false);
     }
   };
 
-  const handleDelete = async (id) => {
+  const onDelete = async (id) => {
     try {
-      await deleteKnowledgePoint(id);
-      message.success('Knowledge point deleted');
-      setPoints((prev) => prev.filter((p) => p.id !== id));
-      if (selected?.id === id) setSelected(null);
+      await deleteKnowledgePoint(courseId, id);
+      message.success('Deleted');
+      fetchPoints();
     } catch {
-      setPoints((prev) => prev.filter((p) => p.id !== id));
-      if (selected?.id === id) setSelected(null);
-      message.success('Knowledge point deleted (offline)');
+      message.error('Delete failed');
+    }
+  };
+
+  const onAddResource = async (values) => {
+    if (!selected?.id) return;
+    try {
+      await addKnowledgeResource(courseId, selected.id, values);
+      message.success('Resource attached');
+      setResourceOpen(false);
+      resourceForm.resetFields();
+      fetchResources(selected.id);
+    } catch {
+      message.error('Attach resource failed');
+    }
+  };
+
+  const onDeleteResource = async (resourceId) => {
+    if (!selected?.id) return;
+    try {
+      await deleteKnowledgeResource(courseId, selected.id, resourceId);
+      message.success('Resource removed');
+      fetchResources(selected.id);
+    } catch {
+      message.error('Remove resource failed');
+    }
+  };
+
+  const onAutoAnalyze = async (values) => {
+    setSaving(true);
+    try {
+      const res = await autoAnalyzeKnowledge(courseId, {
+        title: values.title,
+        text: values.text,
+        category: values.category,
+        tags: (values.tags || []).join(','),
+        fileType: values.fileType,
+      });
+      const count = res.data?.totalCreated ?? 0;
+      message.success(`Auto analysis completed, created ${count} items`);
+      setAnalyzeOpen(false);
+      analyzeForm.resetFields();
+      fetchPoints();
+    } catch {
+      message.error('Auto analysis failed');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const onGenerateMindmap = async () => {
+    if (!selected?.id) return;
+    setSaving(true);
+    try {
+      const res = await getKnowledgeMindmap(courseId, selected.id);
+      setMindmapText(res.data || '');
+      setMindmapOpen(true);
+    } catch {
+      message.error('Generate mind map failed');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -189,185 +259,227 @@ function KnowledgePointPage() {
     <AppLayout activeKey="/kb">
       <div style={{ padding: 24 }}>
         <div className="flex items-center justify-between mb-4">
-          <Title level={3} style={{ margin: 0 }}>Knowledge Points</Title>
-          <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-            New Knowledge Point
-          </Button>
+          <div>
+            <Title level={3} style={{ margin: 0 }}>Knowledge Parsing & Association</Title>
+            <Text type="secondary">Course {courseId} · auto parse, graph-ready associations, advanced search</Text>
+          </div>
+          <Space>
+            <Button icon={<FileSearchOutlined />} onClick={() => setAnalyzeOpen(true)}>
+              Auto Analyze Long Text
+            </Button>
+            <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>New Knowledge Point</Button>
+          </Space>
         </div>
 
-        <Row gutter={16} style={{ height: 'calc(100vh - 200px)' }}>
-          {/* Left panel */}
-          <Col xs={24} md={8} style={{ height: '100%' }}>
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message="Supports: long-document auto splitting, core/difficult/exam extraction, tag combination search (AND/OR), and multi-resource attachment."
+        />
+
+        <Row gutter={16} style={{ height: 'calc(100vh - 240px)' }}>
+          <Col xs={24} md={9} style={{ height: '100%' }}>
             <Card
               bordered={false}
-              style={{ borderRadius: 12, height: '100%', boxShadow: '0 2px 8px rgba(0,0,0,0.06)', display: 'flex', flexDirection: 'column' }}
-              bodyStyle={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', padding: 16 }}
+              style={{ borderRadius: 12, height: '100%', boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}
+              bodyStyle={{ padding: 12, height: '100%', overflow: 'auto' }}
             >
               <Search
-                placeholder="Search knowledge points…"
                 allowClear
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                style={{ marginBottom: 12 }}
+                placeholder="Search by keyword"
+                onSearch={setKeyword}
+                onChange={(e) => setKeyword(e.target.value)}
+                value={keyword}
+                style={{ marginBottom: 10 }}
               />
-              <div style={{ marginBottom: 12, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                <Tag
-                  style={{ cursor: 'pointer' }}
-                  color={!filterTag ? 'blue' : 'default'}
-                  onClick={() => setFilterTag(null)}
-                >
-                  All
-                </Tag>
-                {allTags.map((t) => (
-                  <Tag
-                    key={t}
-                    style={{ cursor: 'pointer' }}
-                    color={filterTag === t ? 'blue' : 'default'}
-                    onClick={() => setFilterTag(filterTag === t ? null : t)}
-                    icon={<TagOutlined />}
-                  >
-                    {t}
-                  </Tag>
-                ))}
-              </div>
-              <div style={{ overflowY: 'auto', flex: 1 }}>
-                <Spin spinning={loading} />
-                {!loading && filtered.length === 0 ? (
-                  <Empty description="No knowledge points found" />
+              <Space style={{ marginBottom: 10 }}>
+                <Select
+                  mode="multiple"
+                  allowClear
+                  placeholder="Filter tags"
+                  style={{ minWidth: 220 }}
+                  value={selectedTags}
+                  onChange={setSelectedTags}
+                  options={allTags.map((t) => ({ label: t, value: t }))}
+                />
+                <Select
+                  value={tagMode}
+                  onChange={setTagMode}
+                  style={{ width: 90 }}
+                  options={[
+                    { label: 'OR', value: 'OR' },
+                    { label: 'AND', value: 'AND' },
+                  ]}
+                />
+              </Space>
+
+              <Spin spinning={loading}>
+                {points.length === 0 ? (
+                  <Empty description="No knowledge points" />
                 ) : (
-                  !loading && filtered.map((point) => (
+                  points.map((p) => (
                     <div
-                      key={point.id}
-                      onClick={() => setSelected(point)}
+                      key={p.id}
+                      onClick={() => setSelected(p)}
                       style={{
-                        padding: '10px 12px',
+                        padding: 10,
                         marginBottom: 8,
                         borderRadius: 8,
                         cursor: 'pointer',
-                        background: selected?.id === point.id ? '#e6f4ff' : '#fafafa',
-                        border: selected?.id === point.id ? '1px solid #91caff' : '1px solid #f0f0f0',
-                        transition: 'all 0.15s',
+                        background: selected?.id === p.id ? '#e6f4ff' : '#fafafa',
+                        border: selected?.id === p.id ? '1px solid #91caff' : '1px solid #f0f0f0',
                       }}
                     >
                       <div className="flex items-center justify-between">
-                        <Text strong style={{ fontSize: 14 }} ellipsis>
-                          {point.title}
-                        </Text>
-                        <Space size={2}>
-                          <Tooltip title="Edit">
-                            <Button
-                              size="small"
-                              type="text"
-                              icon={<EditOutlined />}
-                              onClick={(e) => { e.stopPropagation(); openEdit(point); }}
-                            />
-                          </Tooltip>
-                          <Popconfirm
-                            title="Delete this knowledge point?"
-                            onConfirm={(e) => { e?.stopPropagation(); handleDelete(point.id); }}
-                          >
-                            <Button
-                              size="small"
-                              type="text"
-                              danger
-                              icon={<DeleteOutlined />}
-                              onClick={(e) => e.stopPropagation()}
-                            />
+                        <Text strong ellipsis style={{ maxWidth: 180 }}>{p.title}</Text>
+                        <Space size={4}>
+                          <Button size="small" type="text" icon={<EditOutlined />} onClick={(e) => { e.stopPropagation(); openEdit(p); }} />
+                          <Popconfirm title="Delete this knowledge point?" onConfirm={(e) => { e?.stopPropagation(); onDelete(p.id); }}>
+                            <Button size="small" type="text" danger icon={<DeleteOutlined />} onClick={(e) => e.stopPropagation()} />
                           </Popconfirm>
                         </Space>
                       </div>
                       <div style={{ marginTop: 4 }}>
-                        {point.tags.map((t, i) => (
-                          <Tag key={t} color={TAG_COLORS[i % TAG_COLORS.length]} style={{ fontSize: 11 }}>
-                            {t}
-                          </Tag>
+                        {p.tagsArray.map((t, i) => (
+                          <Tag key={`${p.id}-${t}`} color={TAG_COLORS[i % TAG_COLORS.length]}>{t}</Tag>
                         ))}
                       </div>
-                      <Text type="secondary" style={{ fontSize: 11 }}>
-                        {point.author} · {point.createdAt}
-                      </Text>
                     </div>
                   ))
                 )}
-              </div>
+              </Spin>
             </Card>
           </Col>
 
-          {/* Right panel */}
-          <Col xs={24} md={16} style={{ height: '100%' }}>
+          <Col xs={24} md={15} style={{ height: '100%' }}>
             <Card
               bordered={false}
-              style={{ borderRadius: 12, height: '100%', boxShadow: '0 2px 8px rgba(0,0,0,0.06)', overflowY: 'auto' }}
+              style={{ borderRadius: 12, height: '100%', boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}
+              bodyStyle={{ padding: 16, height: '100%', overflow: 'auto' }}
             >
-              {selected ? (
-                <div style={{ padding: 8 }}>
-                  <div className="flex items-start justify-between mb-3">
+              {!selected ? (
+                <Empty description="Select a knowledge point" />
+              ) : (
+                <>
+                  <div className="flex items-start justify-between">
                     <div>
                       <Title level={4} style={{ margin: 0 }}>{selected.title}</Title>
-                      <Text type="secondary" style={{ fontSize: 12 }}>
-                        Created by {selected.author} · {selected.createdAt}
-                      </Text>
+                      <Space size={8} style={{ marginTop: 6 }}>
+                        <Tag icon={<BulbOutlined />}>{selected.category || 'General'}</Tag>
+                        <Tag>{selected.sourceType || 'MANUAL'}</Tag>
+                        <Tag color="green">{selected.status || 'PUBLISHED'}</Tag>
+                      </Space>
                     </div>
-                    <Button icon={<EditOutlined />} onClick={() => openEdit(selected)}>
-                      Edit
-                    </Button>
+                    <Space>
+                      <Button onClick={onGenerateMindmap}>Generate Mind Map</Button>
+                      <Button icon={<LinkOutlined />} onClick={() => setResourceOpen(true)}>Attach Resource</Button>
+                    </Space>
                   </div>
 
-                  <div style={{ marginBottom: 12 }}>
-                    {selected.tags.map((t, i) => (
-                      <Tag key={t} color={TAG_COLORS[i % TAG_COLORS.length]}>
-                        <TagOutlined /> {t}
-                      </Tag>
-                    ))}
-                  </div>
-
-                  <Divider style={{ margin: '12px 0' }} />
-
-                  <Paragraph style={{ fontSize: 15, lineHeight: 1.8, color: '#374151' }}>
-                    {selected.content}
+                  <Divider />
+                  <Paragraph style={{ whiteSpace: 'pre-wrap', lineHeight: 1.8 }}>
+                    {selected.content || selected.description || 'No content'}
                   </Paragraph>
-                </div>
-              ) : (
-                <div className="flex flex-col items-center justify-center h-full py-16">
-                  <BulbOutlined style={{ fontSize: 48, color: '#d9d9d9' }} />
-                  <Text type="secondary" style={{ marginTop: 16 }}>
-                    Select a knowledge point to view details
-                  </Text>
-                </div>
+
+                  <Divider orientation="left">Attached Multi-Type Resources</Divider>
+                  <Spin spinning={resourceLoading}>
+                    <List
+                      locale={{ emptyText: 'No resources attached' }}
+                      dataSource={resources}
+                      renderItem={(r) => (
+                        <List.Item
+                          actions={[
+                            <a key="open" href={r.url} target="_blank" rel="noreferrer">Open</a>,
+                            <Popconfirm key="del" title="Delete resource?" onConfirm={() => onDeleteResource(r.id)}>
+                              <a>Delete</a>
+                            </Popconfirm>,
+                          ]}
+                        >
+                          <List.Item.Meta
+                            title={<Space><Tag color="blue">{r.resourceType}</Tag>{r.title}</Space>}
+                            description={r.description || r.url}
+                          />
+                        </List.Item>
+                      )}
+                    />
+                  </Spin>
+                </>
               )}
             </Card>
           </Col>
         </Row>
 
-        {/* Create/Edit Modal */}
         <Modal
-          title={editingPoint ? 'Edit Knowledge Point' : 'New Knowledge Point'}
-          open={modalOpen}
-          onCancel={() => setModalOpen(false)}
+          title={editing ? 'Edit Knowledge Point' : 'New Knowledge Point'}
+          open={editOpen}
+          onCancel={() => setEditOpen(false)}
           onOk={() => form.submit()}
-          okText={editingPoint ? 'Save' : 'Create'}
-          width={600}
+          okText="Save"
           confirmLoading={saving}
+          width={760}
         >
-          <Form
-            form={form}
-            layout="vertical"
-            style={{ marginTop: 16 }}
-            onFinish={handleSave}
-          >
-            <Form.Item name="title" label="Title" rules={[{ required: true, message: 'Title is required' }]}>
-              <Input placeholder="Enter knowledge point title" />
+          <Form form={form} layout="vertical" onFinish={onSave}>
+            <Form.Item label="Title" name="title" rules={[{ required: true }]}><Input /></Form.Item>
+            <Form.Item label="Category" name="category"><Input /></Form.Item>
+            <Form.Item label="Tags" name="tags">
+              <Select mode="tags" placeholder="Press Enter to add tags" />
             </Form.Item>
-            <Form.Item name="content" label="Content" rules={[{ required: true, message: 'Content is required' }]}>
-              <TextArea rows={6} placeholder="Describe the knowledge point in detail…" />
-            </Form.Item>
-            <Form.Item name="tags" label="Tags">
-              <Select
-                mode="tags"
-                placeholder="Add tags (press Enter to create)"
-              />
+            <Form.Item label="Description" name="description"><TextArea rows={2} /></Form.Item>
+            <Form.Item label="Content" name="content"><TextArea rows={7} /></Form.Item>
+            <Form.Item label="File URL" name="fileUrl"><Input /></Form.Item>
+            <Form.Item label="File Type" name="fileType"><Input /></Form.Item>
+          </Form>
+        </Modal>
+
+        <Modal
+          title="Auto Analyze Long Document"
+          open={analyzeOpen}
+          onCancel={() => setAnalyzeOpen(false)}
+          onOk={() => analyzeForm.submit()}
+          okText="Analyze & Generate"
+          confirmLoading={saving}
+          width={900}
+        >
+          <Form form={analyzeForm} layout="vertical" onFinish={onAutoAnalyze}>
+            <Form.Item label="Document Title" name="title" rules={[{ required: true }]}><Input /></Form.Item>
+            <Form.Item label="Category" name="category"><Input placeholder="e.g. Algorithms" /></Form.Item>
+            <Form.Item label="Tags" name="tags"><Select mode="tags" /></Form.Item>
+            <Form.Item label="File Type" name="fileType"><Input placeholder="PDF / DOCX / OCR" /></Form.Item>
+            <Form.Item label="Long Text Content" name="text" rules={[{ required: true }]}>
+              <TextArea rows={14} placeholder="Paste long lecture notes / textbook content here..." />
             </Form.Item>
           </Form>
+        </Modal>
+
+        <Modal
+          title="Attach Resource"
+          open={resourceOpen}
+          onCancel={() => setResourceOpen(false)}
+          onOk={() => resourceForm.submit()}
+          okText="Attach"
+        >
+          <Form form={resourceForm} layout="vertical" onFinish={onAddResource}>
+            <Form.Item label="Resource Type" name="resourceType" rules={[{ required: true }]}>
+              <Select options={RESOURCE_TYPES.map((t) => ({ label: t, value: t }))} />
+            </Form.Item>
+            <Form.Item label="Title" name="title" rules={[{ required: true }]}><Input /></Form.Item>
+            <Form.Item label="URL" name="url" rules={[{ required: true }]}><Input /></Form.Item>
+            <Form.Item label="Description" name="description"><TextArea rows={3} /></Form.Item>
+          </Form>
+        </Modal>
+
+        <Modal
+          title="Mind Map (Mermaid)"
+          open={mindmapOpen}
+          onCancel={() => setMindmapOpen(false)}
+          footer={null}
+          width={900}
+        >
+          <Text type="secondary">Copy the Mermaid text to any Mermaid renderer:</Text>
+          <pre style={{ whiteSpace: 'pre-wrap', background: '#fafafa', padding: 12, borderRadius: 8, marginTop: 8 }}>
+            {mindmapText}
+          </pre>
         </Modal>
       </div>
     </AppLayout>
