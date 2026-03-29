@@ -20,3 +20,18 @@ export const listDiscussions = (courseId, params) =>
 
 export const createDiscussion = (courseId, data) =>
   apiClient.post(`/courses/${courseId}/discussions`, data);
+
+export const rateCourse = (courseId, data) =>
+  apiClient.post(`/courses/${courseId}/rating`, data);
+
+export const getCourseRating = (courseId) =>
+  apiClient.get(`/courses/${courseId}/rating`);
+
+export const getCourseStats = (courseId) =>
+  apiClient.get(`/courses/${courseId}/stats`);
+
+export const listCourseResources = (courseId, params) =>
+  apiClient.get(`/courses/${courseId}/resources`, { params });
+
+export const downloadCourseResource = (courseId, resourceId) =>
+  apiClient.get(`/courses/${courseId}/resources/${resourceId}/download`, { responseType: 'blob' });

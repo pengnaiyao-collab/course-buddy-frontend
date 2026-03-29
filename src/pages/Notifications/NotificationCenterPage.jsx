@@ -11,12 +11,15 @@ import {
   Popconfirm,
   message,
   Spin,
+  Alert,
 } from 'antd';
 import {
   BellOutlined,
   CheckOutlined,
   DeleteOutlined,
   ReloadOutlined,
+  WifiOutlined,
+  DisconnectOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { useDispatch, useSelector } from 'react-redux';
@@ -36,6 +39,7 @@ import {
   deleteNotification as apiDelete,
   clearAllNotifications as apiClearAll,
 } from '../../services/api/notifications';
+import websocketService from '../../services/ws/websocket';
 
 const { Title, Text } = Typography;
 
@@ -95,6 +99,9 @@ function NotificationCenterPage() {
   const dispatch = useDispatch();
   const { items, loading } = useSelector((state) => state.notifications);
   const [activeTab, setActiveTab] = useState('all');
+  const [wsConnected, setWsConnected] = useState(false);
+  const token = localStorage.getItem('token');
+  const { user } = useSelector((state) => state.auth);
 
   const fetchNotifications = async () => {
     dispatch(setLoading(true));
@@ -106,8 +113,59 @@ function NotificationCenterPage() {
     }
   };
 
+  // WebSocket setup for real-time notifications
   useEffect(() => {
-    fetchNotifications();
+    if (!user?.id || !token) return;
+
+    const handleWSConnected = () => {
+      setWsConnected(true);
+      console.log('WebSocket connected for notifications');
+    };
+
+    const handleWSError = (error) => {
+      console.error('WebSocket connection error:', error);
+      setWsConnected(false);
+    };
+
+    websocketService.connect(token, handleWSConnected, handleWSError);
+
+    // Subscribe to notifications queue
+    const notificationChannel = `/queue/user/${user.id}/notifications`;
+    websocketService.subscribe(notificationChannel, (msg) => {
+      console.log('New notification received:', msg);
+      try {
+        const notificationData = JSON.parse(msg.body);
+
+        // Add new notification to the list
+        const newNotification = {
+          id: Date.now(),
+          title: notificationData.title || 'New Notification',
+          content: notificationData.content || '',
+          type: notificationData.type || 'system',
+          read: false,
+          createdAt: new Date().toISOString(),
+        };
+
+        // Dispatch action to add notification
+        dispatch(setNotifications([newNotification, ...items]));
+
+        // Show notification toast
+        message.success(notificationData.title);
+      } catch (err) {
+        console.warn('Failed to parse notification:', err);
+      }
+    });
+
+    return () => {
+      websocketService.unsubscribe(notificationChannel);
+    };
+  }, [user?.id, token, dispatch, items]);
+
+  // Cleanup WebSocket on unmount
+  useEffect(() => {
+    return () => {
+      websocketService.disconnect();
+    };
   }, []);
 
   const handleMarkRead = async (id) => {
@@ -160,6 +218,16 @@ function NotificationCenterPage() {
             <Text style={{ color: 'var(--text-secondary)' }}>{t('notifications.subtitle')}</Text>
           </div>
           <Space>
+            {wsConnected && (
+              <Tag icon={<WifiOutlined />} color="success">
+                Real-time On
+              </Tag>
+            )}
+            {!wsConnected && (
+              <Tag icon={<DisconnectOutlined />} color="default">
+                Offline
+              </Tag>
+            )}
             <Button icon={<ReloadOutlined />} onClick={fetchNotifications}>
               {t('common.refresh')}
             </Button>

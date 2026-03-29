@@ -7,6 +7,7 @@ import notificationsReducer from './slices/notificationsSlice';
 import messagesReducer from './slices/messagesSlice';
 import searchReducer from './slices/searchSlice';
 import userReducer from './slices/userSlice';
+import wsReducer from './slices/wsSlice';
 
 export const store = configureStore({
   reducer: {
@@ -18,6 +19,7 @@ export const store = configureStore({
     messages: messagesReducer,
     search: searchReducer,
     user: userReducer,
+    websocket: wsReducer,
   },
   middleware: (getDefaultMiddleware) =>
     getDefaultMiddleware({

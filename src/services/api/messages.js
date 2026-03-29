@@ -1,22 +1,42 @@
 import apiClient from './client';
 
-export const getConversations = () =>
-  apiClient.get('/messages/conversations');
+// Get all conversations
+export const getConversations = (page = 0, size = 20) =>
+  apiClient.get('/messages/conversations', { params: { page, size } });
 
-export const getMessages = (conversationId, params) =>
-  apiClient.get(`/messages/conversations/${conversationId}/messages`, { params });
+// Get conversation history with specific user
+export const getConversation = (userId, page = 0, size = 50) =>
+  apiClient.get(`/messages/conversations/${userId}`, { params: { page, size } });
 
-export const sendMessage = (conversationId, data) =>
-  apiClient.post(`/messages/conversations/${conversationId}/messages`, data);
+// Send message to user
+export const sendMessage = (recipientId, content) =>
+  apiClient.post('/messages', { recipientId, content });
 
-export const editMessage = (conversationId, messageId, data) =>
-  apiClient.put(`/messages/conversations/${conversationId}/messages/${messageId}`, data);
+// Mark single message as read
+export const markMessageRead = (messageId) =>
+  apiClient.put(`/messages/${messageId}/read`);
 
-export const deleteMessage = (conversationId, messageId) =>
-  apiClient.delete(`/messages/conversations/${conversationId}/messages/${messageId}`);
+// Mark all messages with user as read
+export const markConversationRead = (userId) =>
+  apiClient.put(`/messages/conversations/${userId}/read-all`);
 
-export const markConversationRead = (conversationId) =>
-  apiClient.put(`/messages/conversations/${conversationId}/read`);
+// Delete message
+export const deleteMessage = (messageId) =>
+  apiClient.delete(`/messages/${messageId}`);
 
-export const createConversation = (data) =>
-  apiClient.post('/messages/conversations', data);
+// Get unread message count
+export const getUnreadCount = () =>
+  apiClient.get('/messages/unread/count');
+
+// Get unread messages from specific user
+export const getUnreadMessages = (userId) =>
+  apiClient.get(`/messages/conversations/${userId}/unread`);
+
+// Search messages
+export const searchMessages = (query) =>
+  apiClient.get('/messages/search', { params: { q: query } });
+
+// Get message statistics
+export const getMessageStats = () =>
+  apiClient.get('/messages/stats');
+

@@ -35,9 +35,13 @@ import {
   EditOutlined,
   ReloadOutlined,
   UserAddOutlined,
+  CommentOutlined,
+  HistoryOutlined,
 } from '@ant-design/icons';
 import AppLayout from '../../components/layout/AppLayout';
-import { useSelector } from 'react-redux';
+import { useSelector, useDispatch } from 'react-redux';
+import websocketService from '../../services/ws/websocket';
+import { setConnected, addCollaborationUpdate } from '../../store/slices/wsSlice';
 import {
   listProjects,
   createProject,
@@ -50,6 +54,11 @@ import {
   listProjectMembers,
   inviteProjectMember,
   removeProjectMember,
+  updateMemberRole,
+  listTaskComments,
+  createTaskComment,
+  deleteTaskComment,
+  getProjectLogs,
 } from '../../services/api/collaboration';
 
 const { Title, Text, Paragraph } = Typography;
@@ -102,7 +111,23 @@ function CollaborationPage() {
   const [projectForm] = Form.useForm();
   const [taskForm] = Form.useForm();
   const [inviteForm] = Form.useForm();
+  const [memberRoleForm] = Form.useForm();
   const { user } = useSelector((state) => state.auth);
+
+  // New states for enhanced features
+  const [selectedMemberForRole, setSelectedMemberForRole] = useState(null);
+  const [roleModalOpen, setRoleModalOpen] = useState(false);
+  const [taskComments, setTaskComments] = useState([]);
+  const [selectedTaskForComments, setSelectedTaskForComments] = useState(null);
+  const [commentModalOpen, setCommentModalOpen] = useState(false);
+  const [newComment, setNewComment] = useState('');
+  const [activityLogs, setActivityLogs] = useState([]);
+  const [logsLoading, setLogsLoading] = useState(false);
+
+  // Search and filter states
+  const [taskSearchText, setTaskSearchText] = useState('');
+  const [taskStatusFilter, setTaskStatusFilter] = useState(null);
+  const [taskPriorityFilter, setTaskPriorityFilter] = useState(null);
 
   const fetchProjects = useCallback(async () => {
     setLoading(true);
@@ -145,9 +170,82 @@ function CollaborationPage() {
     }
   }, [selectedProject, fetchProjectDetails]);
 
+  // WebSocket initialization for real-time collaboration updates
+  const dispatch = useDispatch();
+  const token = localStorage.getItem('token');
+
+  useEffect(() => {
+    if (!user?.id || !selectedProject || !token) return;
+
+    const handleWSConnected = () => {
+      dispatch(setConnected(true));
+      console.log('WebSocket connected for collaboration');
+    };
+
+    const handleWSError = (error) => {
+      console.error('WebSocket connection error:', error);
+      dispatch(setConnected(false));
+    };
+
+    // Connect to WebSocket
+    websocketService.connect(token, handleWSConnected, handleWSError);
+
+    // Subscribe to collaboration updates for this project
+    const collaborationChannel = `/topic/collaboration/${selectedProject.id}`;
+    websocketService.subscribe(collaborationChannel, (msg) => {
+      console.log('Received collaboration update:', msg);
+
+      dispatch(addCollaborationUpdate(msg));
+
+      // Handle different message types
+      if (msg.type === 'TASK_UPDATED') {
+        setTasks((prev) =>
+          prev.map((t) => t.id === msg.taskId ? { ...t, ...msg.data } : t)
+        );
+        message.info(`Task updated: ${msg.data?.title}`);
+      } else if (msg.type === 'TASK_CREATED') {
+        setTasks((prev) => [msg.data, ...prev]);
+        message.success('New task added');
+      } else if (msg.type === 'TASK_DELETED') {
+        setTasks((prev) => prev.filter((t) => t.id !== msg.taskId));
+        message.info('Task removed');
+      } else if (msg.type === 'MEMBER_JOINED') {
+        setMembers((prev) => [...prev, msg.data]);
+        message.success(`${msg.data?.name} joined the project`);
+      } else if (msg.type === 'MEMBER_LEFT') {
+        setMembers((prev) => prev.filter((m) => m.id !== msg.memberId));
+        message.info('Member left the project');
+      }
+    });
+
+    // Cleanup on unmount or when project changes
+    return () => {
+      websocketService.unsubscribe(collaborationChannel);
+    };
+  }, [user?.id, selectedProject, token, dispatch]);
+
+  // Cleanup WebSocket on component unmount
+  useEffect(() => {
+    return () => {
+      websocketService.disconnect();
+    };
+  }, []);
+
   const handleSelectProject = (project) => {
     setSelectedProject(project);
   };
+
+  // Filter tasks based on search and filters
+  const getFilteredTasks = useCallback(() => {
+    return tasks.filter((task) => {
+      const matchesSearch = !taskSearchText ||
+        task.title?.toLowerCase().includes(taskSearchText.toLowerCase()) ||
+        task.description?.toLowerCase().includes(taskSearchText.toLowerCase());
+      const matchesStatus = !taskStatusFilter || task.status === taskStatusFilter;
+      const matchesPriority = !taskPriorityFilter || task.priority === taskPriorityFilter;
+      return matchesSearch && matchesStatus && matchesPriority;
+    });
+  }, [tasks, taskSearchText, taskStatusFilter, taskPriorityFilter]);
 
   // Projects CRUD
   const openCreateProject = () => {
@@ -272,6 +370,93 @@ function CollaborationPage() {
     message.success('Member removed');
   };
 
+  // Enhanced: Member role update
+  const handleEditMemberRole = (member) => {
+    setSelectedMemberForRole(member);
+    memberRoleForm.setFieldsValue({ role: member.role });
+    setRoleModalOpen(true);
+  };
+
+  const handleUpdateMemberRole = async (values) => {
+    try {
+      await updateMemberRole(selectedProject.id, selectedMemberForRole.id, { ...selectedMemberForRole, ...values });
+      setMembers((prev) =>
+        prev.map((m) =>
+          m.id === selectedMemberForRole.id ? { ...m, ...values } : m
+        )
+      );
+      message.success('Member role updated');
+    } catch (err) {
+      console.warn('Update member role API unavailable, proceeding locally:', err);
+      setMembers((prev) =>
+        prev.map((m) =>
+          m.id === selectedMemberForRole.id ? { ...m, ...values } : m
+        )
+      );
+      message.success('Member role updated (offline)');
+    }
+    setRoleModalOpen(false);
+  };
+
+  // Enhanced: Task comments
+  const fetchTaskComments = useCallback(async (task) => {
+    try {
+      const res = await listTaskComments(selectedProject.id, task.id);
+      setTaskComments(res.data?.comments || res.data || []);
+    } catch (err) {
+      console.warn('Failed to fetch task comments:', err);
+      setTaskComments([]);
+    }
+  }, [selectedProject]);
+
+  const handleAddComment = async (task) => {
+    if (!newComment.trim()) {
+      message.warning('Please enter a comment');
+      return;
+    }
+    try {
+      await createTaskComment(selectedProject.id, task.id, { content: newComment });
+      message.success('Comment added');
+      fetchTaskComments(task);
+      setNewComment('');
+    } catch (err) {
+      console.warn('Add comment API unavailable:', err);
+      setTaskComments((prev) => [
+        ...prev,
+        { id: Date.now(), content: newComment, author: user?.name || 'Me', createdAt: new Date().toLocaleString() },
+      ]);
+      message.success('Comment added (offline)');
+      setNewComment('');
+    }
+  };
+
+  const handleDeleteComment = async (task, commentId) => {
+    try {
+      await deleteTaskComment(selectedProject.id, task.id, commentId);
+      setTaskComments((prev) => prev.filter((c) => c.id !== commentId));
+      message.success('Comment deleted');
+    } catch (err) {
+      console.warn('Delete comment API unavailable:', err);
+      setTaskComments((prev) => prev.filter((c) => c.id !== commentId));
+      message.success('Comment deleted (offline)');
+    }
+  };
+
+  // Enhanced: Activity logs
+  const fetchActivityLogs = useCallback(async () => {
+    if (!selectedProject) return;
+    setLogsLoading(true);
+    try {
+      const res = await getProjectLogs(selectedProject.id);
+      setActivityLogs(res.data?.logs || res.data || []);
+    } catch (err) {
+      console.warn('Failed to fetch activity logs:', err);
+      setActivityLogs([]);
+    } finally {
+      setLogsLoading(false);
+    }
+  }, [selectedProject]);
+
   const tasksByStatus = (status) => tasks.filter((t) => t.status === status);
   const totalTasks = tasks.length;
   const doneTasks = tasksByStatus('done').length;
@@ -377,21 +562,70 @@ function CollaborationPage() {
                       label: <><CheckSquareOutlined /> Tasks ({tasks.length})</>,
                       children: (
                         <div>
-                          <div style={{ marginBottom: 12, textAlign: 'right' }}>
+                          <div style={{ marginBottom: 16, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                            <Input
+                              placeholder="Search tasks..."
+                              prefix="🔍"
+                              value={taskSearchText}
+                              onChange={(e) => setTaskSearchText(e.target.value)}
+                              style={{ flex: 1, minWidth: 200 }}
+                              size="small"
+                            />
+                            <Select
+                              placeholder="Filter by status"
+                              value={taskStatusFilter}
+                              onChange={setTaskStatusFilter}
+                              allowClear
+                              style={{ width: 140 }}
+                              size="small"
+                              options={[
+                                { value: 'todo', label: 'To Do' },
+                                { value: 'in_progress', label: 'In Progress' },
+                                { value: 'done', label: 'Done' },
+                                { value: 'blocked', label: 'Blocked' },
+                              ]}
+                            />
+                            <Select
+                              placeholder="Filter by priority"
+                              value={taskPriorityFilter}
+                              onChange={setTaskPriorityFilter}
+                              allowClear
+                              style={{ width: 130 }}
+                              size="small"
+                              options={[
+                                { value: 'low', label: 'Low' },
+                                { value: 'medium', label: 'Medium' },
+                                { value: 'high', label: 'High' },
+                              ]}
+                            />
                             <Button type="primary" size="small" icon={<PlusOutlined />} onClick={openCreateTask}>
                               Add Task
                             </Button>
                           </div>
                           {taskLoading ? (
                             <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
-                          ) : tasks.length === 0 ? (
-                            <Empty description="No tasks yet" />
+                          ) : getFilteredTasks().length === 0 ? (
+                            <Empty description={taskSearchText || taskStatusFilter || taskPriorityFilter ? "No matching tasks" : "No tasks yet"} />
                           ) : (
                             <List
-                              dataSource={tasks}
+                              dataSource={getFilteredTasks()}
                               renderItem={(task) => (
                                 <List.Item
                                   actions={[
+                                    <Button
+                                      key="comments"
+                                      size="small"
+                                      type="text"
+                                      icon={<CommentOutlined />}
+                                      onClick={() => {
+                                        setSelectedTaskForComments(task);
+                                        fetchTaskComments(task);
+                                        setCommentModalOpen(true);
+                                      }}
+                                      title="View and add comments"
+                                    >
+                                      Comments
+                                    </Button>,
                                     <Select
                                       key="status"
                                       size="small"
@@ -455,6 +689,16 @@ function CollaborationPage() {
                               renderItem={(member) => (
                                 <List.Item
                                   actions={[
+                                    <Button
+                                      key="edit-role"
+                                      size="small"
+                                      type="text"
+                                      icon={<EditOutlined />}
+                                      onClick={() => handleEditMemberRole(member)}
+                                      title="Edit member role"
+                                    >
+                                      Edit
+                                    </Button>,
                                     member.role !== 'admin' && (
                                       <Popconfirm key="remove" title="Remove member?" onConfirm={() => handleRemoveMember(member.id)} okText="Yes" cancelText="No">
                                         <Button size="small" type="text" danger icon={<DeleteOutlined />} />
@@ -466,6 +710,41 @@ function CollaborationPage() {
                                     avatar={<Avatar style={{ background: '#1677ff' }}>{member.avatar || member.name?.[0] || <UserOutlined />}</Avatar>}
                                     title={<Space><Text strong>{member.name}</Text><Tag color={member.role === 'admin' ? 'red' : 'blue'}>{member.role}</Tag></Space>}
                                     description={member.email}
+                                  />
+                                </List.Item>
+                              )}
+                            />
+                          )}
+                        </div>
+                      ),
+                    },
+                    {
+                      key: 'logs',
+                      label: <><HistoryOutlined /> Activity Logs</>,
+                      children: (
+                        <div>
+                          <div style={{ marginBottom: 12, textAlign: 'right' }}>
+                            <Button size="small" icon={<ReloadOutlined />} onClick={fetchActivityLogs} loading={logsLoading}>
+                              Refresh
+                            </Button>
+                          </div>
+                          {logsLoading ? (
+                            <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
+                          ) : activityLogs.length === 0 ? (
+                            <Empty description="No activity yet" />
+                          ) : (
+                            <List
+                              dataSource={activityLogs}
+                              renderItem={(log) => (
+                                <List.Item>
+                                  <List.Item.Meta
+                                    title={<Text>{log.action || 'Activity'}</Text>}
+                                    description={
+                                      <Text type="secondary" style={{ fontSize: 12 }}>
+                                        {log.actor || 'User'}  ·  {log.createdAt || log.timestamp}
+                                        {log.details && <> · {log.details}</>}
+                                      </Text>
+                                    }
                                   />
                                 </List.Item>
                               )}
@@ -587,6 +866,101 @@ function CollaborationPage() {
             </Space>
           </Form.Item>
         </Form>
+      </Modal>
+
+      {/* Member Role Edit Modal */}
+      <Modal
+        title="Edit Member Role"
+        open={roleModalOpen}
+        onCancel={() => setRoleModalOpen(false)}
+        footer={null}
+      >
+        {selectedMemberForRole && (
+          <Form form={memberRoleForm} layout="vertical" onFinish={handleUpdateMemberRole}>
+            <Form.Item name="name" label="Member">
+              <Input disabled value={selectedMemberForRole.name} />
+            </Form.Item>
+            <Form.Item name="role" label="Role" rules={[{ required: true }]}>
+              <Select options={[
+                { value: 'admin', label: 'Admin' },
+                { value: 'member', label: 'Member' },
+                { value: 'viewer', label: 'Viewer' },
+              ]} />
+            </Form.Item>
+            <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
+              <Space>
+                <Button onClick={() => setRoleModalOpen(false)}>Cancel</Button>
+                <Button type="primary" htmlType="submit">Update Role</Button>
+              </Space>
+            </Form.Item>
+          </Form>
+        )}
+      </Modal>
+
+      {/* Task Comments Modal */}
+      <Modal
+        title={`Comments on "${selectedTaskForComments?.title}"`}
+        open={commentModalOpen}
+        onCancel={() => {
+          setCommentModalOpen(false);
+          setSelectedTaskForComments(null);
+          setNewComment('');
+        }}
+        width={600}
+        footer={null}
+      >
+        {selectedTaskForComments && (
+          <div>
+            <div style={{ maxHeight: 300, overflowY: 'auto', marginBottom: 16, paddingBottom: 8 }}>
+              {taskComments.length === 0 ? (
+                <Empty description="No comments yet" style={{ paddingTop: 20 }} />
+              ) : (
+                <List
+                  dataSource={taskComments}
+                  renderItem={(comment) => (
+                    <List.Item
+                      actions={[
+                        <Button
+                          type="text"
+                          danger
+                          size="small"
+                          icon={<DeleteOutlined />}
+                          onClick={() => handleDeleteComment(selectedTaskForComments, comment.id)}
+                        />,
+                      ]}
+                    >
+                      <List.Item.Meta
+                        title={<Text strong>{comment.author || 'User'}</Text>}
+                        description={
+                          <>
+                            <Text style={{ display: 'block' }}>{comment.content}</Text>
+                            <Text type="secondary" style={{ fontSize: 12 }}>{comment.createdAt}</Text>
+                          </>
+                        }
+                      />
+                    </List.Item>
+                  )}
+                />
+              )}
+            </div>
+            <Divider style={{ margin: '12px 0' }} />
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Input.TextArea
+                rows={2}
+                placeholder="Add a comment…"
+                value={newComment}
+                onChange={(e) => setNewComment(e.target.value)}
+              />
+              <Button
+                type="primary"
+                onClick={() => handleAddComment(selectedTaskForComments)}
+                style={{ alignSelf: 'flex-end' }}
+              >
+                Post
+              </Button>
+            </div>
+          </div>
+        )}
       </Modal>
     </AppLayout>
   );

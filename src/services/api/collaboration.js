@@ -41,3 +41,22 @@ export const inviteProjectMember = (projectId, data) =>
 
 export const removeProjectMember = (projectId, memberId) =>
   apiClient.delete(`/collaboration/projects/${projectId}/members/${memberId}`);
+
+export const updateMemberRole = (projectId, memberId, data) =>
+  apiClient.put(`/collaboration/projects/${projectId}/members/${memberId}/role`, data);
+
+// ── Task Comments ──────────────────────────────────────────────────────────
+
+export const listTaskComments = (projectId, taskId) =>
+  apiClient.get(`/collaboration/projects/${projectId}/tasks/${taskId}/comments`);
+
+export const createTaskComment = (projectId, taskId, data) =>
+  apiClient.post(`/collaboration/projects/${projectId}/tasks/${taskId}/comments`, data);
+
+export const deleteTaskComment = (projectId, taskId, commentId) =>
+  apiClient.delete(`/collaboration/projects/${projectId}/tasks/${taskId}/comments/${commentId}`);
+
+// ── Activity Logs ──────────────────────────────────────────────────────────
+
+export const getProjectLogs = (projectId, params) =>
+  apiClient.get(`/collaboration/projects/${projectId}/logs`, { params });

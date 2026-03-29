@@ -20,6 +20,8 @@ import {
   Col,
   Divider,
   Alert,
+  Modal,
+  DatePicker,
 } from 'antd';
 import {
   HomeOutlined,
@@ -32,6 +34,7 @@ import {
   FileTextOutlined,
   BulbOutlined,
   QuestionCircleOutlined,
+  EditOutlined,
 } from '@ant-design/icons';
 import AppLayout from '../../components/layout/AppLayout';
 import {
@@ -75,8 +78,13 @@ function AIContentPage() {
   const [usageStats, setUsageStats] = useState(null);
   const [files, setFiles] = useState([]);
   const [form] = Form.useForm();
+  const [editForm] = Form.useForm();
   const abortControllerRef = useRef(null);
   const outputRef = useRef(null);
+  const [editingHistory, setEditingHistory] = useState(null);
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [filterType, setFilterType] = useState(null);
+  const [filterDateRange, setFilterDateRange] = useState(null);
 
   const fetchHistory = useCallback(async () => {
     setHistoryLoading(true);
@@ -125,12 +133,13 @@ function AIContentPage() {
     setStreamingText('');
     setGeneratedContent('');
 
-    const payload = {
+    // Support both form values and direct payload object
+    const payload = values.type ? {
       type: values.type,
       topic: values.topic,
       fileIds: values.fileIds || [],
       language: values.language || 'en',
-    };
+    } : values;
 
     try {
       const response = await streamGenerate(payload);
@@ -204,6 +213,42 @@ function AIContentPage() {
     setHistory((prev) => prev.filter((h) => h.id !== id));
     message.success('Deleted from history');
   };
+
+  const handleEditHistory = (item) => {
+    setEditingHistory(item);
+    editForm.setFieldsValue({
+      type: item.type,
+      topic: item.topic,
+      language: item.language || 'en',
+    });
+    setEditModalOpen(true);
+  };
+
+  const handleRegenerateFromEdit = async (values) => {
+    setEditModalOpen(false);
+    const payload = {
+      type: values.type,
+      topic: values.topic,
+      fileIds: values.fileIds || [],
+      language: values.language || 'en',
+    };
+    await handleGenerate(payload);
+  };
+
+  const handleRegenerate = async (item) => {
+    const payload = {
+      type: item.type,
+      topic: item.topic,
+      fileIds: item.fileIds || [],
+      language: item.language || 'en',
+    };
+    await handleGenerate(payload);
+  };
+
+  const filteredHistory = history.filter((h) => {
+    if (filterType && h.type !== filterType) return false;
+    return true;
+  });
 
   const handleCopyContent = () => {
     const text = generatedContent || streamingText;
@@ -346,18 +391,50 @@ function AIContentPage() {
               label: <><HistoryOutlined /> History</>,
               children: (
                 <Card bordered={false} style={{ borderRadius: 12, boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}>
-                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                    <Space>
+                      <Select
+                        placeholder="Filter by type"
+                        style={{ width: 180 }}
+                        allowClear
+                        value={filterType}
+                        onChange={setFilterType}
+                        options={[
+                          ...GENERATION_TYPES.map((t) => ({ value: t.value, label: t.label })),
+                        ]}
+                      />
+                    </Space>
                     <Button icon={<ReloadOutlined />} size="small" onClick={fetchHistory} loading={historyLoading}>
                       Refresh
                     </Button>
                   </div>
                   <List
                     loading={historyLoading}
-                    dataSource={history}
+                    dataSource={filteredHistory}
                     locale={{ emptyText: 'No generation history yet' }}
                     renderItem={(item) => (
                       <List.Item
                         actions={[
+                          <Button
+                            key="regenerate"
+                            size="small"
+                            type="text"
+                            icon={<ReloadOutlined />}
+                            onClick={() => handleRegenerate(item)}
+                            title="Regenerate with same parameters"
+                          >
+                            Regenerate
+                          </Button>,
+                          <Button
+                            key="edit"
+                            size="small"
+                            type="text"
+                            icon={<EditOutlined />}
+                            onClick={() => handleEditHistory(item)}
+                            title="Edit and regenerate"
+                          >
+                            Edit
+                          </Button>,
                           <Popconfirm
                             key="delete"
                             title="Delete this history entry?"
@@ -448,6 +525,65 @@ function AIContentPage() {
             },
           ]}
         />
+
+        {/* Edit History Modal */}
+        <Modal
+          title="Edit and Regenerate"
+          open={editModalOpen}
+          onCancel={() => {
+            setEditModalOpen(false);
+            setEditingHistory(null);
+          }}
+          footer={[
+            <Button key="cancel" onClick={() => {
+              setEditModalOpen(false);
+              setEditingHistory(null);
+            }}>
+              Cancel
+            </Button>,
+            <Button
+              key="submit"
+              type="primary"
+              icon={<ThunderboltOutlined />}
+              onClick={() => editForm.submit()}
+              loading={generating}
+            >
+              Regenerate
+            </Button>,
+          ]}
+        >
+          <Form
+            form={editForm}
+            layout="vertical"
+            onFinish={handleRegenerateFromEdit}
+            initialValues={{ language: 'en' }}
+          >
+            <Form.Item name="type" label="Content Type" rules={[{ required: true }]}>
+              <Select
+                options={GENERATION_TYPES.map((t) => ({ value: t.value, label: t.label }))}
+              />
+            </Form.Item>
+            <Form.Item name="topic" label="Topic / Subject" rules={[{ required: true, message: 'Please enter a topic' }]}>
+              <Input placeholder="e.g. Binary Search Trees, React Hooks, SQL Joins" />
+            </Form.Item>
+            <Form.Item name="fileIds" label="Source Files (optional)">
+              <Select
+                mode="multiple"
+                allowClear
+                placeholder="Select knowledge base files to use as context"
+                options={files.map((f) => ({ value: f.id, label: f.name }))}
+              />
+            </Form.Item>
+            <Form.Item name="language" label="Output Language">
+              <Select
+                options={[
+                  { value: 'en', label: '🇺🇸 English' },
+                  { value: 'zh', label: '🇨🇳 Chinese' },
+                ]}
+              />
+            </Form.Item>
+          </Form>
+        </Modal>
       </div>
     </AppLayout>
   );

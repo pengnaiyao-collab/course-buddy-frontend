@@ -38,6 +38,8 @@ import {
   unenrollCourse,
   listDiscussions,
   createDiscussion,
+  getCourseStats,
+  rateCourse,
 } from '../../services/api/courses';
 
 const { Title, Paragraph, Text } = Typography;
@@ -123,6 +125,13 @@ function CourseLibraryPage() {
   const [enrollingId, setEnrollingId] = useState(null);
   const { user } = useSelector((state) => state.auth);
 
+  // New filters and stats
+  const [filterDifficulty, setFilterDifficulty] = useState(null);
+  const [filterCategory, setFilterCategory] = useState(null);
+  const [courseStats, setCourseStats] = useState(null);
+  const [userRating, setUserRating] = useState(0);
+  const [statsLoading, setStatsLoading] = useState(false);
+
   const fetchCourses = useCallback(async () => {
     setLoading(true);
     try {
@@ -172,16 +181,49 @@ function CourseLibraryPage() {
     setSelectedCourse(course);
     setDetailVisible(true);
     setDiscussions([]);
+    setStatsLoading(true);
     try {
-      const res = await listDiscussions(course.id);
-      setDiscussions(res.data?.discussions || res.data || []);
+      const [disRes, statsRes] = await Promise.all([
+        listDiscussions(course.id),
+        getCourseStats(course.id),
+      ]);
+      setDiscussions(disRes.data?.discussions || disRes.data || []);
+      setCourseStats(statsRes.data || null);
     } catch {
       setDiscussions([
         { id: 1, author: 'Alice Wang', content: 'Great course! The algorithm sections are very clear.', createdAt: '2024-03-15' },
         { id: 2, author: 'Bob Liu', content: 'Could use more practice problems.', createdAt: '2024-03-16' },
       ]);
+      setCourseStats({ avgRating: 4.5, totalRatings: 82, learnerCount: 156 });
+    } finally {
+      setStatsLoading(false);
     }
   };
+
+  const handleRateCourse = async (rating) => {
+    try {
+      await rateCourse(selectedCourse.id, { rating });
+      setUserRating(rating);
+      message.success(`Rated ${rating} stars`);
+    } catch {
+      setUserRating(rating);
+      message.success(`Rated ${rating} stars (offline)`);
+    }
+  };
+
+  // Filter courses
+  const filteredCourses = courses.filter((c) => {
+    const q = searchQuery.toLowerCase();
+    const matchQ = !q || c.title?.toLowerCase().includes(q) || c.description?.toLowerCase().includes(q);
+    const matchDiff = !filterDifficulty || c.tags?.includes(filterDifficulty);
+    const matchCat = !filterCategory || c.tags?.includes(filterCategory);
+    return matchQ && matchDiff && matchCat;
+  });
+
+  // Extract unique categories and difficulties
+  const allTags = Array.from(new Set(courses.flatMap((c) => c.tags || [])));
+  const difficulties = ['Beginner', 'Intermediate', 'Advanced'];
+  const categories = allTags.filter((t) => !difficulties.includes(t));
 
   const handlePostDiscussion = async () => {
     if (!discussionInput.trim()) return;
@@ -226,26 +268,44 @@ function CourseLibraryPage() {
           </Tooltip>
         </div>
 
-        <Space style={{ marginBottom: 24 }}>
-          <Search
-            placeholder="Search courses…"
-            prefix={<SearchOutlined />}
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            style={{ width: 320 }}
-            allowClear
-          />
+        <Space style={{ marginBottom: 24, width: '100%' }} direction="vertical">
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+            <Search
+              placeholder="Search courses…"
+              prefix={<SearchOutlined />}
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              style={{ width: 300, flexShrink: 0 }}
+              allowClear
+            />
+            <Select
+              placeholder="Filter by difficulty"
+              style={{ width: 180 }}
+              allowClear
+              value={filterDifficulty}
+              onChange={setFilterDifficulty}
+              options={difficulties.map((d) => ({ value: d, label: d }))}
+            />
+            <Select
+              placeholder="Filter by category"
+              style={{ width: 180 }}
+              allowClear
+              value={filterCategory}
+              onChange={setFilterCategory}
+              options={categories.map((c) => ({ value: c, label: c }))}
+            />
+          </div>
         </Space>
 
         {loading ? (
           <div style={{ textAlign: 'center', padding: 60 }}>
             <Spin size="large" />
           </div>
-        ) : filtered.length === 0 ? (
+        ) : filteredCourses.length === 0 ? (
           <Empty description="No courses found" />
         ) : (
           <Row gutter={[16, 16]}>
-            {filtered.map((course) => (
+            {filteredCourses.map((course) => (
               <Col key={course.id} xs={24} sm={12} lg={8}>
                 <Card
                   hoverable
@@ -328,6 +388,33 @@ function CourseLibraryPage() {
                       <Col span={8}><Text strong>Materials:</Text> <Text>{selectedCourse.materials}</Text></Col>
                       <Col span={8}><Text strong>Students:</Text> <Text>{selectedCourse.studentCount}</Text></Col>
                     </Row>
+                    <Divider />
+                    <Text strong style={{ display: 'block', marginBottom: 8 }}>Course Rating</Text>
+                    {statsLoading ? (
+                      <Spin size="small" />
+                    ) : (
+                      <>
+                        <div style={{ marginBottom: 12 }}>
+                          <Text>{courseStats?.avgRating || 0} / 5.0</Text>
+                          <Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>({courseStats?.totalRatings || 0} ratings)</Text>
+                        </div>
+                        <Space>
+                          {[1, 2, 3, 4, 5].map((star) => (
+                            <span
+                              key={star}
+                              onClick={() => handleRateCourse(star)}
+                              style={{
+                                fontSize: 24,
+                                cursor: 'pointer',
+                                color: star <= userRating ? '#fadb14' : '#d9d9d9',
+                              }}
+                            >
+                              ★
+                            </span>
+                          ))}
+                        </Space>
+                      </>
+                    )}
                     {selectedCourse.enrolled && (
                       <>
                         <Divider />

@@ -11,6 +11,7 @@ import {
   Spin,
   Popconfirm,
   message,
+  Tag,
 } from 'antd';
 import {
   MessageOutlined,
@@ -18,6 +19,8 @@ import {
   UserOutlined,
   DeleteOutlined,
   EditOutlined,
+  WifiOutlined,
+  DisconnectOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { useDispatch, useSelector } from 'react-redux';
@@ -38,6 +41,7 @@ import {
   deleteMessage as apiDelete,
   markConversationRead as apiMarkRead,
 } from '../../services/api/messages';
+import websocketService from '../../services/ws/websocket';
 
 const { Title, Text } = Typography;
 
@@ -90,7 +94,10 @@ function MessageCenterPage() {
   const [inputValue, setInputValue] = useState('');
   const [sending, setSending] = useState(false);
   const [searchVal, setSearchVal] = useState('');
+  const [wsConnected, setWsConnected] = useState(false);
+  const [typingStatus, setTypingStatus] = useState({});
   const messagesEndRef = useRef(null);
+  const token = localStorage.getItem('token');
 
   useEffect(() => {
     const fetch = async () => {
@@ -104,6 +111,62 @@ function MessageCenterPage() {
     };
     fetch();
   }, [dispatch]);
+
+  // WebSocket setup for real-time messages
+  useEffect(() => {
+    if (!user?.id || !token) return;
+
+    const handleWSConnected = () => {
+      setWsConnected(true);
+      console.log('WebSocket connected for messages');
+    };
+
+    const handleWSError = (error) => {
+      console.error('WebSocket connection error:', error);
+      setWsConnected(false);
+    };
+
+    websocketService.connect(token, handleWSConnected, handleWSError);
+
+    // Subscribe to personal message queue
+    const messageChannel = `/queue/user/${user.id}/messages`;
+    websocketService.subscribe(messageChannel, (msg) => {
+      console.log('New message received:', msg);
+      try {
+        const messageData = JSON.parse(msg.body);
+
+        // Add message to appropriate conversation
+        const conversationId = messageData.conversationId || messageData.from;
+        const newMessage = {
+          id: messageData.id || Date.now(),
+          content: messageData.content || messageData.text,
+          senderId: messageData.senderId || messageData.from,
+          createdAt: messageData.createdAt || new Date().toISOString(),
+          read: false,
+        };
+
+        dispatch(addMessage({ conversationId, message: newMessage }));
+
+        // Show notification for unread messages
+        if (conversationId !== activeConversationId) {
+          message.info(`New message from ${messageData.senderName}`);
+        }
+      } catch (err) {
+        console.warn('Failed to parse message:', err);
+      }
+    });
+
+    return () => {
+      websocketService.unsubscribe(messageChannel);
+    };
+  }, [user?.id, token, dispatch, activeConversationId]);
+
+  // Cleanup WebSocket on unmount
+  useEffect(() => {
+    return () => {
+      websocketService.disconnect();
+    };
+  }, []);
 
   const fetchMessages = async (convId) => {
     if (messages[convId]) return;
@@ -161,11 +224,16 @@ function MessageCenterPage() {
   return (
     <AppLayout>
       <div style={{ padding: 0, height: 'calc(100vh - 64px)', display: 'flex', flexDirection: 'column' }}>
-        <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--border-color)', background: 'var(--bg-primary)' }}>
+        <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--border-color)', background: 'var(--bg-primary)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <Title level={4} style={{ margin: 0, color: 'var(--text-primary)' }}>
             <MessageOutlined style={{ marginRight: 8 }} />
             {t('messages.title')}
           </Title>
+          {wsConnected && (
+            <Tag icon={<WifiOutlined />} color="success">
+              {t('common.online')}
+            </Tag>
+          )}
         </div>
 
         <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
